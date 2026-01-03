@@ -36,3 +36,21 @@ class AppModule extends Module {
   );
 }
 ```
+
+```ts twoslash
+class Animal {
+  name: string;
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+class Dog extends Animal {
+  breed: string;
+  constructor(name: string, breed: string) {
+    super(name);
+    this.breed = breed;
+  }
+}
+const myDog = new Dog("Buddy", "Golden Retriever");
+myDog.breed;
+```

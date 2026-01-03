@@ -3,6 +3,7 @@ export enum TokenKind {
   LineComment = 'LineComment',
   BlockComment = 'BlockComment',
   Identifier = 'Identifier',
+  ClassIdentifier = 'ClassIdentifier',
   Keyword = 'Keyword',
   NumberLiteral = 'NumberLiteral',
   StringLiteral = 'StringLiteral',
@@ -35,6 +36,12 @@ const keywordSet = new Set([
 const isIdentifierStart = (ch: string) => /[A-Za-z_]/.test(ch)
 const isIdentifierPart = (ch: string) => /[A-Za-z0-9_]/.test(ch)
 const isDigit = (ch: string) => /[0-9]/.test(ch)
+const getPreviousTokenByType = (tokens: Token[], desiredType: TokenKind) => {
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    if (tokens[i].kind === desiredType) return tokens[i]
+  }
+  return null
+}
 
 export function lexDart(code: string): Token[] {
   const tokens: Token[] = []
@@ -119,7 +126,12 @@ export function lexDart(code: string): Token[] {
       i++
       while (i < code.length && isIdentifierPart(code[i])) i++
       const text = code.slice(start, i)
+      const previousToken = getPreviousTokenByType(tokens, TokenKind.Keyword)
       const kind = keywordSet.has(text) ? TokenKind.Keyword : TokenKind.Identifier
+      if (previousToken && previousToken.text === 'class' && kind === TokenKind.Identifier) {
+        tokens.push({ kind: TokenKind.ClassIdentifier, text, start, end: i })
+        continue
+      }
       tokens.push({ kind, text, start, end: i })
       continue
     }

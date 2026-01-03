@@ -30,7 +30,7 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 		popover.innerHTML = renderMarkdownLite(decodeURIComponent(payload))
 		popover.style.display = 'block'
 		popover.dataset.visible = 'true'
-    popover.dataset.fromClick = fromClick ? 'true' : 'false'
+    	popover.dataset.fromClick = fromClick ? 'true' : 'false'
 
 		requestAnimationFrame(() => positionPopover(popover, target))
 	}

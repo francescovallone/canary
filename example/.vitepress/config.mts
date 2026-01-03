@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { serinusTypes } from '../../src/serinus-types'
 import { canaryTransformer } from '../../src/transformer'
+import { transformerTwoslash } from '@shikijs/vitepress-twoslash'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
@@ -27,6 +28,11 @@ export default defineConfig({
     ]
   },
   markdown: {
-    codeTransformers: [canaryTransformer({ customTypes: serinusTypes, explicitTrigger: true })],
+    codeTransformers: [
+      canaryTransformer({ customTypes: serinusTypes, explicitTrigger: true }),
+      transformerTwoslash() 
+    ],
   }
 })
+
+

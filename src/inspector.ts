@@ -108,16 +108,13 @@ function collectClassesAndExtends(tokens: Token[]): { classes: Set<string>; exte
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
     if (token.kind === TokenKind.Keyword && token.text === 'class') {
-      const classIdent = nextNonTrivia(tokens, i + 1, TokenKind.Identifier)
+      const classIdent = nextNonTrivia(tokens, i + 1, TokenKind.ClassIdentifier)
       if (!classIdent) continue
       classes.add(classIdent.text)
 
       const maybeExtends = nextNonTrivia(tokens, tokens.indexOf(classIdent) + 1)
-      console.log(maybeExtends);
-      console.log(classIdent);
       if (maybeExtends && maybeExtends.text === 'extends') {
         const baseIdent = nextNonTrivia(tokens, tokens.indexOf(maybeExtends) + 1, TokenKind.Identifier)
-        console.log(baseIdent);
         if (baseIdent) {
           extendsMap.set(classIdent.text, baseIdent.text)
           classes.add(baseIdent.text)
@@ -186,7 +183,7 @@ function inferInitializerType(tokens: Token[], startIndex: number, classes: Set<
 
 function isTypeToken(token: Token, classes: Set<string>): boolean {
   if (token.kind === TokenKind.Keyword && PRIMITIVES.has(token.text)) return true
-  if (token.kind === TokenKind.Identifier && classes.has(token.text)) return true
+  if ((token.kind === TokenKind.Identifier || token.kind === TokenKind.ClassIdentifier) && classes.has(token.text)) return true
   return false
 }
 
@@ -202,13 +199,13 @@ function findTarget(tokens: Token[], directiveIndex: number): TargetToken | null
   if (!cursor) return null
 
   // If the directive precedes "final/var" or a type keyword, move to the following identifier
-  if (cursor.kind === TokenKind.Keyword || cursor.kind === TokenKind.Identifier) {
+  if (cursor.kind === TokenKind.Keyword || cursor.kind === TokenKind.Identifier || cursor.kind === TokenKind.ClassIdentifier) {
     // final|var Foo x => jump to the declared identifier
     const maybeName = nextNonTrivia(tokens, tokens.indexOf(cursor) + 1, TokenKind.Identifier)
     if (maybeName) cursor = maybeName
   }
 
-  if (cursor.kind !== TokenKind.Identifier) return null
+  if (cursor.kind !== TokenKind.Identifier && cursor.kind !== TokenKind.ClassIdentifier) return null
 
   // Class Foo extends Bar => capture the base type too
   const maybeExtends = nextNonTrivia(tokens, tokens.indexOf(cursor) + 1, TokenKind.Keyword)
@@ -268,8 +265,11 @@ function buildHover(
     }
   }
 
-  const type = variables.get(target.base.text) ?? 'unknown'
-  let content = type === 'unknown' ? 'type: unknown' : `\`${target.base.text}\`: ${type}`
+  const type = variables.get(target.base.text)
+  const classLabel = baseIsClass ? `class ${target.base.text}` : null
+  const resolvedType = type ?? classLabel ?? 'unknown'
+
+  let content = resolvedType === 'unknown' ? 'type: unknown' : `${resolvedType}`
   
   // Add description from custom type if available
   const typeInfo = customTypes?.get(type)
@@ -290,7 +290,8 @@ function buildExtendsHover(
 ): Hover | null {
   const typeName = extendsType.text
 
-  let content = `\`${typeName}\``
+  const baseLabel = classes.has(typeName) ? `class ${typeName}` : null
+  let content = baseLabel ? `${baseLabel}` : `\`${typeName}\``
   const custom = customTypes?.get(typeName)
   if (custom?.description) {
     content += `\n\n${custom.description}`
@@ -383,7 +384,14 @@ function nextNonTrivia(tokens: Token[], startIndex: number, desiredKind?: TokenK
   for (let i = startIndex; i < tokens.length; i++) {
     const token = tokens[i]
     if (token.kind === TokenKind.Whitespace || token.kind === TokenKind.LineComment || token.kind === TokenKind.BlockComment) continue
-    if (!desiredKind || token.kind === desiredKind) return token
+
+    if (!desiredKind) return token
+    if (token.kind === desiredKind) return token
+
+    // Treat class identifiers as identifiers for lookup convenience
+    if (desiredKind === TokenKind.Identifier && token.kind === TokenKind.ClassIdentifier) return token
+    if (desiredKind === TokenKind.ClassIdentifier && token.kind === TokenKind.Identifier) return token
+
     return undefined
   }
   return undefined
