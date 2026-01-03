@@ -1,0 +1,149 @@
+import { defineCustomTypes } from './define-types'
+
+/**
+ * Custom types for Serinus framework documentation.
+ * Import this in config.mts and pass to dartInspectTransformer.
+ */
+export const serinusTypes = defineCustomTypes({
+  types: [
+    // Core types
+    {
+      name: 'SerinusApplication',
+      description: 'The main application class that bootstraps and runs the server.',
+      members: {
+        serve: { type: 'Future<void>', description: 'Starts the HTTP server.' },
+        use: { type: 'void', description: 'Registers a global middleware or hook.' },
+      },
+    },
+    {
+      name: 'serinus',
+      description: 'Factory class for creating a Serinus application instance.',
+      staticMembers: {
+        createApplication: { type: 'SerinusApplication', description: 'Creates a new Serinus application.' },
+      },
+    },
+    {
+      name: 'Module',
+      description: 'A class that organizes controllers, providers, and imports.',
+      members: {
+        controllers: 'List<Controller>',
+        providers: 'List<Provider>',
+        imports: 'List<Module>',
+        exports: 'List<Type>',
+      },
+    },
+    {
+      name: 'Controller',
+      description: 'Base class for route controllers that handle HTTP requests.',
+      members: {
+        path: { type: 'String', description: 'The base path for all routes in this controller.' },
+      },
+    },
+    {
+      name: 'Provider',
+      description: 'A service that can be injected into controllers and other providers.',
+      members: {
+        get: { type: 'T', description: 'Retrieves a dependency from the container.' },
+      },
+    },
+    
+    // Request/Response
+    {
+      name: 'Request',
+      description: 'Represents an incoming HTTP request.',
+      members: {
+        method: 'String',
+        path: 'String',
+        uri: 'Uri',
+        headers: 'Map<String, String>',
+        body: { type: 'dynamic', description: 'The parsed request body.' },
+        query: { type: 'Map<String, String>', description: 'Query parameters from the URL.' },
+        params: { type: 'Map<String, String>', description: 'Path parameters from the route.' },
+      },
+    },
+    {
+      name: 'Response',
+      description: 'Represents an HTTP response to send to the client.',
+      members: {
+        statusCode: 'int',
+        headers: 'Map<String, String>',
+        body: 'dynamic',
+      },
+      staticMembers: {
+        json: { type: 'Response', description: 'Creates a JSON response.' },
+        text: { type: 'Response', description: 'Creates a plain text response.' },
+        html: { type: 'Response', description: 'Creates an HTML response.' },
+        redirect: { type: 'Response', description: 'Creates a redirect response.' },
+      },
+    },
+    {
+      name: 'RequestContext',
+      description: 'Context object available in route handlers.',
+      members: {
+        request: 'Request',
+        params: 'Map<String, String>',
+        query: 'Map<String, String>',
+        body: 'dynamic',
+      },
+    },
+    
+    // Decorators (represented as types for hover)
+    {
+      name: 'Get',
+      description: 'Decorator for HTTP GET routes.',
+    },
+    {
+      name: 'Post',
+      description: 'Decorator for HTTP POST routes.',
+    },
+    {
+      name: 'Put',
+      description: 'Decorator for HTTP PUT routes.',
+    },
+    {
+      name: 'Delete',
+      description: 'Decorator for HTTP DELETE routes.',
+    },
+    {
+      name: 'Patch',
+      description: 'Decorator for HTTP PATCH routes.',
+    },
+    
+    // Middleware & Hooks
+    {
+      name: 'Middleware',
+      description: 'Base class for request/response middleware.',
+      members: {
+        handle: { type: 'Future<void>', description: 'Processes the request before or after the handler.' },
+      },
+    },
+    {
+      name: 'Hook',
+      description: 'Lifecycle hook for intercepting application events.',
+      members: {
+        onRequest: 'Future<void>',
+        onResponse: 'Future<void>',
+      },
+    },
+    
+    // WebSocket
+    {
+      name: 'WebSocketGateway',
+      description: 'Gateway for handling WebSocket connections.',
+      members: {
+        onConnect: 'Future<void>',
+        onDisconnect: 'Future<void>',
+        onMessage: 'Future<void>',
+      },
+    },
+    {
+      name: 'WebSocketClient',
+      description: 'Represents a connected WebSocket client.',
+      members: {
+        id: 'String',
+        send: { type: 'void', description: 'Sends a message to this client.' },
+        close: { type: 'Future<void>', description: 'Closes the connection.' },
+      },
+    },
+  ],
+})

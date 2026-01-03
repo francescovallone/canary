@@ -1,0 +1,13 @@
+{
+  "name": "canary",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "shiki": "^3.20.0",
+    "vitepress": "2.0.0-alpha.15"
+  }
+  
+}

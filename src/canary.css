@@ -1,0 +1,44 @@
+:root {
+	--canary-popover-bg: var(--vp-c-bg, inherit);
+	--canary-popover-code-bg: var(--vp-c-bg-2, inherit);
+	--canary-popover-color: var(--vp-c-text-1);
+	--canary-docs-color: var(--vp-c-text-1);
+	--canary-docs-font: var(--vp-font-family-base);
+	--canary-code-font: var(--vp-font-family-mono);
+	--canary-code-size: var(--vp-code-font-size);
+	--canary-underline-color: #8888;
+	--canary-border-color: var(--vp-c-border);
+	--canary-cursor-color: var(--vp-c-brand);
+	--canary-matched-color: var(--vp-c-brand);
+	--canary-unmatched-color: var(--vp-c-text-2);
+}
+
+[data-dart-hover] {
+	position: relative;
+}
+
+.canary-hover-popover {
+	position: absolute;
+	z-index: 40;
+	display: none;
+	max-width: 320px;
+	padding: 10px 12px;
+	border: 1px solid var(--canary-border-color);
+	background: var(--canary-popover-bg);
+	color: var(--canary-popover-color);
+	border-radius: 6px;
+	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+	font-size: 0.875rem;
+	line-height: 1.4;
+}
+
+.canary-hover-popover code {
+	background: var(--canary-popover-code-bg);
+	padding: 2px 4px;
+	border-radius: 4px;
+	font-size: 0.85em;
+}
+
+.canary-hover-popover[data-visible='true'] {
+	display: block;
+}

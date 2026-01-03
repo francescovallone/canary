@@ -1,0 +1,65 @@
+{
+  "types": [
+    {
+      "name": "Provider",
+      "description": "A dependency injection container that manages service instances.",
+      "members": {
+        "get": {
+          "type": "T",
+          "description": "Retrieves an instance of type T from the container."
+        },
+        "has": "bool",
+        "register": "void"
+      },
+      "staticMembers": {
+        "of": {
+          "type": "Provider",
+          "description": "Returns the nearest Provider in the current scope."
+        }
+      },
+      "constructors": ["Provider()"]
+    },
+    {
+      "name": "Controller",
+      "description": "Base class for route controllers in Serinus.",
+      "members": {
+        "path": "String",
+        "routes": "List<Route>"
+      }
+    },
+    {
+      "name": "Request",
+      "description": "Represents an incoming HTTP request.",
+      "members": {
+        "method": "String",
+        "path": "String",
+        "headers": "Map<String, String>",
+        "body": {
+          "type": "dynamic",
+          "description": "The parsed request body. Type depends on content-type."
+        },
+        "query": "Map<String, String>",
+        "params": "Map<String, String>"
+      }
+    },
+    {
+      "name": "Response",
+      "description": "Represents an HTTP response to be sent to the client.",
+      "members": {
+        "statusCode": "int",
+        "headers": "Map<String, String>",
+        "body": "dynamic"
+      },
+      "staticMembers": {
+        "json": {
+          "type": "Response",
+          "description": "Creates a JSON response with the given data."
+        },
+        "text": {
+          "type": "Response",
+          "description": "Creates a plain text response."
+        }
+      }
+    }
+  ]
+}
