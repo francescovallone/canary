@@ -13,6 +13,12 @@ export interface CanaryTransformerOptions {
    */
   customTypes?: CustomTypesConfig,
 
+  /**
+   * If true, the transformer will only run on code blocks
+   * that include the `canary` directive in the first line of metadata.
+   * If false, it will run on all Dart code blocks.
+   * @default false
+   */
   explicitTrigger?: boolean,
 }
 
@@ -31,7 +37,7 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
   return {
     name: 'canary',
     preprocess(code, options) {
-      const trigger = getTriggerDirective(code)
+      const trigger = getTriggerDirective(options?.meta?.__raw || '')
       if (!isDartLang(String((options as any).lang))) return
       if (explicitTrigger && !trigger) return
       // Analyse on original code (with directives)

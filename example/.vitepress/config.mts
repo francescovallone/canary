@@ -27,6 +27,6 @@ export default defineConfig({
     ]
   },
   markdown: {
-    codeTransformers: [canaryTransformer({ customTypes: serinusTypes })],
+    codeTransformers: [canaryTransformer({ customTypes: serinusTypes, explicitTrigger: true })],
   }
 })
