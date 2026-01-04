@@ -1,18 +1,14 @@
-import type { ShikiTransformer, ThemedToken } from 'shiki'
-import { inspectDart, type InspectResult, type CustomTypesConfig } from './inspector'
+import { hastToHtml, type ShikiTransformer, type ThemedToken } from 'shiki'
+import { collect } from './context-builder/collect'
+import { lex } from './context-builder/lexer'
+import { resolve, type Hover } from './context-builder/resolve'
+import { Element, ElementContent } from 'hast'
 
 interface CanaryMeta {
-  canary?: InspectResult
-  offsetMap?: Map<number, number> // original offset → stripped offset
+  canary?: { hovers: Hover[] }
 }
 
 export interface CanaryTransformerOptions {
-  /**
-   * Custom type definitions. Provide an inline config object
-   * with the types you want the inspector to recognize.
-   */
-  customTypes?: CustomTypesConfig,
-
   /**
    * If true, the transformer will only run on code blocks
    * that include the `canary` directive in the first line of metadata.
@@ -24,7 +20,7 @@ export interface CanaryTransformerOptions {
 
 const isDartLang = (lang: string | undefined) => (lang ?? '').toLowerCase() === 'dart'
 
-const getTriggerDirective = (meta: string): bool => {
+const getTriggerDirective = (meta: string): boolean => {
   if (meta.length === 0) return false
   const lines = meta.split(' ')
   if (lines.length === 0) return false
@@ -32,57 +28,26 @@ const getTriggerDirective = (meta: string): bool => {
 }
 
 export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTransformer {
-  const customTypes = options?.customTypes
   const explicitTrigger = options?.explicitTrigger ?? false
+  let isDart = false
   return {
     name: 'canary',
     preprocess(code, options) {
       const trigger = getTriggerDirective(options?.meta?.__raw || '')
       if (!isDartLang(String((options as any).lang))) return
+      isDart = true
       if (explicitTrigger && !trigger) return
-      // Analyse on original code (with directives)
-      const analysis = inspectDart(code, { customTypes })
+      // Analyse on original code (with directives intact)
+      const tokens = lex(code)
+      const { fileScope } = collect(tokens)
+      const hovers = resolve(tokens, fileScope)
+      ;(this.meta as CanaryMeta).canary = { hovers }
 
-      // Build stripped code and offset mapping
-      const lines = code.split('\n')
-      let stripped = ''
-      let origOffset = 0
-      let strippedOffset = 0
-      const offsetMap = new Map<number, number>()
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        const lineLen = line.length + (i < lines.length - 1 ? 1 : 0) // +1 for \n except last
-
-        if (line.trim().startsWith('// inspect:')) {
-          // Skip this line; adjust future offsets
-        } else {
-          // Record mapping for each character in this line
-          for (let c = 0; c < lineLen; c++) {
-            offsetMap.set(origOffset + c, strippedOffset + c)
-          }
-          stripped += line + (i < lines.length - 1 ? '\n' : '')
-          strippedOffset += lineLen
-        }
-        origOffset += lineLen
-      }
-
-      // Remap hover ranges
-      for (const hover of analysis.hovers) {
-        hover.range.start = offsetMap.get(hover.range.start) ?? hover.range.start
-        hover.range.end = offsetMap.get(hover.range.end - 1) !== undefined
-          ? (offsetMap.get(hover.range.end - 1)! + 1)
-          : hover.range.end
-      }
-
-      ;(this.meta as CanaryMeta).canary = analysis
-      ;(this.meta as CanaryMeta).offsetMap = offsetMap
-
-      return stripped
+      return code
     },
     span(hast, _line, _col, _lineElement, token) {
       const meta = (this.meta as CanaryMeta).canary
-      if (!meta || !meta.hovers.length) return
+      if (!meta || !meta.hovers?.length) return
       
       const hover = findHoverForToken(token, meta.hovers)
       if (!hover) return
@@ -93,7 +58,7 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       hast.children = []
       const textNode = (currentChildren[0] as any)?.value
       if (!textNode || typeof textNode !== 'string') return
-      const splittedParts = textNode.split(/\s+/g)
+      const splittedParts = textNode.split(/\s/g)
       for (const part of splittedParts) {
         if (part === sanitized) {
           const innerSpan: any = {
@@ -102,15 +67,30 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
             properties: {},
             children: [{ type: 'text', value: sanitized }],
           }
-
+          const typeCode: Element = {
+            type: 'element',
+            tagName: 'code',
+            properties: {},
+            children: this.codeToHast(
+              hover.markdown,
+              {
+                ...this.options,
+                meta: {},
+                transformers: [],
+                lang: 'dart',
+                structure: hover.markdown.trim().includes('\n') ? 'classic' : 'inline',
+              },
+            ).children as ElementContent[],
+          }
+          typeCode.properties.className = 'canary-popup-code'
           const wrapperDiv: any = {
             type: 'element',
             tagName: 'div',
             properties: {
               className: mergeClass(undefined, 'dart-inspectable'),
-              'data-dart-hover': encodeURIComponent(hover.content),
+              'data-dart-hover-code': encodeURIComponent(hastToHtml(typeCode)),
+              'data-dart-hover-docs': encodeURIComponent(hover.documentation || ''),
               'data-dart-hover-range': `${hover.range.start}-${hover.range.end}`,
-              style: 'display: inline-block; border-bottom: 1px solid var(--vp-c-brand-1);',
             },
             children: [innerSpan],
           }
@@ -120,10 +100,15 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
         hast.children.push({ type: 'text', value: part + ' '})
       }
     },
+    pre(hast) {
+      if (!isDart) return
+      this.addClassToHast(hast, 'canary')
+      isDart = false
+    }
   }
 }
 
-function findHoverForToken(token: ThemedToken, hovers: InspectResult['hovers']) {
+function findHoverForToken(token: ThemedToken, hovers: Hover[]) {
   const start = token.offset
   const end = start + token.content.length
   return hovers.find(h => end > h.range.start && start < h.range.end)

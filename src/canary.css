@@ -22,7 +22,6 @@
 	z-index: 40;
 	display: none;
 	max-width: 320px;
-	padding: 10px 12px;
 	border: 1px solid var(--canary-border-color);
 	background: var(--canary-popover-bg);
 	color: var(--canary-popover-color);
@@ -32,13 +31,60 @@
 	line-height: 1.4;
 }
 
-.canary-hover-popover code {
-	background: var(--canary-popover-code-bg);
-	padding: 2px 4px;
-	border-radius: 4px;
-	font-size: 0.85em;
-}
-
 .canary-hover-popover[data-visible='true'] {
 	display: block;
+}
+.canary:hover .dart-inspectable {
+	border-bottom: 1px dotted var(--canary-underline-color);
+}
+.dart-inspectable {
+	display: inline-block; 
+	border-bottom: 1px solid transparent;
+	transition: border-bottom 0.2s;
+}
+
+.canary-hover-popover:after, .canary-hover-popover:before {
+	bottom: 100%;
+	left: 50%;
+	border: solid transparent;
+	content: "";
+	height: 0;
+	width: 0;
+	position: absolute;
+	pointer-events: none;
+}
+
+.canary-hover-popover:after {
+	border-color: transparent;
+	border-bottom-color: var(--canary-popover-bg);
+	border-width: 6px;
+	margin-left: -6px;
+}
+.canary-hover-popover:before {
+	border-color: transparent;
+	border-bottom-color: var(--canary-border-color);
+	border-width: 7px;
+	margin-left: -7px;
+}
+.canary-hover-popover-docs {
+    border-top: 1px solid var(--canary-border-color);
+    color: var(--canary-docs-color);
+    padding: 12px !important;
+    font-family: var(--canary-docs-font);
+    font-size: 1em;
+    max-height: 500px;
+    max-width: 700px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    text-wrap: balance;
+}
+.canary-popup-code {
+    max-width: 600px;
+    display: block;
+    width: fit-content;
+    min-width: 100%;
+    padding: 6px 12px;
+    line-height: var(--vp-code-line-height);
+    transition: color 0.5s;
+    white-space: pre-wrap;
 }

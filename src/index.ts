@@ -1,4 +1,4 @@
-export { dartInspectTransformer, type DartInspectTransformerOptions } from './transformer'
-export { inspectDart, type Hover, type InspectResult, type CustomType, type CustomTypesConfig, type InspectOptions } from './inspector'
-export { lexDart, type Token, TokenKind } from './lexer'
-export { defineCustomTypes, defineType } from './define-types'
+export { canaryTransformer, type CanaryTransformerOptions } from './transformer'
+export { defineCustomTypes, defineType, type CustomType, type CustomTypesConfig } from './define-types'
+export { lex, TokenKind, type Token } from './context-builder/lexer'
+export { resolve, type Hover } from './context-builder/resolve'

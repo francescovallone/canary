@@ -25,19 +25,23 @@ features:
 
 
 ```dart canary
-import 'package:serinus/serinus.dart';
+class Dog {
+  final String name;
 
-import 'app_controller.dart';
+  String get breed => "Unknown Breed"; 
+  
+  Dog(this.name, this.breed);
 
-// inspect:type
-class AppModule extends Module {
-  AppModule() : super(
-    controllers: [AppController()],
-  );
+  void bark() {
+    print("Woof! Woof!");
+  }
 }
+final myDog = Dog("Buddy", "Golden Retriever");
+myDog.breed;
 ```
 
 ```ts twoslash
+// @errors: 2554 2339
 class Animal {
   name: string;
   constructor(name: string) {
@@ -45,10 +49,9 @@ class Animal {
   }
 }
 class Dog extends Animal {
-  breed: string;
-  constructor(name: string, breed: string) {
+  constructor(name: string) {
     super(name);
-    this.breed = breed;
+    console.log(name);
   }
 }
 const myDog = new Dog("Buddy", "Golden Retriever");

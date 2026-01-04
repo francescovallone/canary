@@ -8,10 +8,33 @@ const renderMarkdownLite = (markdown: string) =>
 		.replace(/\n/g, '<br>')
 
 export function setupCanaryTheme(ctx: EnhanceAppContext) {
+	const scheduleWire = (wireTimer?: number) => {
+		if (wireTimer) clearTimeout(wireTimer)
+		wireTimer = setTimeout(wire, 50)
+	}
 	if (typeof window === 'undefined') return
-
+    window.addEventListener('vitepress:codeGroupTabActivate', () => scheduleWire(), { passive: true })
+    window.addEventListener('click', (e) => {
+      const path = e.composedPath()
+      if (path.some((el: any) => el?.classList?.contains?.('vp-code-group') || el?.classList?.contains?.('tabs')))
+        scheduleWire()
+    }, { passive: true })
 	const popover = document.createElement('div')
-	popover.className = 'canary-hover-popover'
+	popover.className = 'canary-hover-popover shiki'
+	const arrowContaienr = document.createElement('div')
+	arrowContaienr.className = 'canary-hover-popover-arrow-container'
+	const innerArrow = document.createElement('div')
+	innerArrow.className = 'canary-hover-popover-inner-arrow'
+	arrowContaienr.appendChild(innerArrow)
+	const outerArrow = document.createElement('div')
+	outerArrow.className = 'canary-hover-popover-outer-arrow'
+	arrowContaienr.appendChild(outerArrow)
+	const textContainer = document.createElement('div')
+	textContainer.className = 'canary-hover-popover-wrapper'
+	const docsContainer = document.createElement('div')
+	docsContainer.className = 'canary-hover-popover-docs'
+	popover.appendChild(textContainer)
+	popover.appendChild(arrowContaienr)
 	document.body.appendChild(popover)
 
 	const wiredNodes = new WeakSet<HTMLElement>()
@@ -24,10 +47,18 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 	}
 
 	const show = (target: HTMLElement, fromClick: boolean = false) => {
-		const payload = target.dataset.dartHover
+		const payload = target.dataset.dartHoverCode
 		if (!payload) return
 
-		popover.innerHTML = renderMarkdownLite(decodeURIComponent(payload))
+		textContainer.innerHTML = renderMarkdownLite(decodeURIComponent(payload))
+		const docsPayload = target.dataset.dartHoverDocs
+		if (docsPayload) {
+			docsContainer.innerHTML = renderMarkdownLite(decodeURIComponent(docsPayload))
+			textContainer.appendChild(docsContainer)
+			docsContainer.style.display = 'block'
+		} else {
+			docsContainer.style.display = 'none'
+		}
 		popover.style.display = 'block'
 		popover.dataset.visible = 'true'
     	popover.dataset.fromClick = fromClick ? 'true' : 'false'
@@ -36,8 +67,9 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 	}
 
 	const wire = () => {
-		const nodes = document.querySelectorAll<HTMLElement>('[data-dart-hover]')
-
+		const nodes = document.querySelectorAll('.dart-inspectable')
+		console.log(`Canary: wiring ${nodes.length} nodes for hover`)
+		console.log(nodes)
 		nodes.forEach(node => {
 			if (wiredNodes.has(node)) return
 			wiredNodes.add(node)
@@ -68,13 +100,9 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 	}
 
 	let wireTimer: ReturnType<typeof setTimeout> | null = null
-	const scheduleWire = () => {
-		if (wireTimer) clearTimeout(wireTimer)
-		wireTimer = setTimeout(wire, 50)
-	}
 
-	ctx.router.onAfterRouteChange?.(() => scheduleWire())
-	ctx.router.onAfterRouteChanged?.(() => scheduleWire())
+	ctx.router.onAfterRouteChange?.(() => scheduleWire(wireTimer))
+	ctx.router.onAfterRouteChanged?.(() => scheduleWire(wireTimer))
 
 	// Watch for DOM updates (hydration / client nav) that add code blocks
 	const observer = new MutationObserver(mutations => {

@@ -1,4 +1,15 @@
-import type { CustomTypesConfig, CustomType } from './inspector'
+export interface CustomType {
+  name: string
+  description?: string
+  extends?: string
+  members?: Record<string, string | { type: string; description?: string }>
+  staticMembers?: Record<string, string | { type: string; description?: string }>
+  constructors?: string[]
+}
+
+export interface CustomTypesConfig {
+  types: CustomType[]
+}
 
 /**
  * Helper to define custom types with TypeScript support.
@@ -43,5 +54,3 @@ export function defineCustomTypes(config: CustomTypesConfig): CustomTypesConfig 
 export function defineType(type: CustomType): CustomType {
   return type
 }
-
-export { CustomTypesConfig, CustomType }

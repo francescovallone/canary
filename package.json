@@ -6,8 +6,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "hast-util-to-html": "^9.0.5",
     "shiki": "^3.20.0",
     "vitepress": "2.0.0-alpha.15"
+  },
+  "devDependencies": {
+    "@types/hast": "^3.0.4"
   }
-  
 }
