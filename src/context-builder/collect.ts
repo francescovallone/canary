@@ -85,7 +85,6 @@ export function collect(tokens: Token[]) {
         console.log(scope.symbols)
     }
 
-
     // Method or constructor
     if (
       scope.kind === ScopeKind.Class &&
@@ -93,20 +92,21 @@ export function collect(tokens: Token[]) {
       nextNonTrivia(tokens, i + 1)?.text === '('
     ) {
       const isCtor = t.text === currentClass
+      const newScope = new Scope(
+        isCtor ? ScopeKind.Constructor : ScopeKind.Method,
+        scope
+      )
+
+      console.log('Found method/ctor:', t.text, 'isCtor:', isCtor, t.start, t.end)
       const node: Node = {
         kind: isCtor ? NodeKind.Constructor : NodeKind.Method,
         name: t.text,
         start: t.start,
         end: t.end,
-        scope,
+        scope: newScope,
       }
 
       nodes.push(node)
-
-      const newScope = new Scope(
-        isCtor ? ScopeKind.Constructor : ScopeKind.Method,
-        scope
-      )
 
       scope.define({
         name: node.name,
@@ -116,6 +116,35 @@ export function collect(tokens: Token[]) {
 
       scope = newScope
       continue
+    }
+    if (scope.kind === ScopeKind.Method || scope.kind === ScopeKind.Constructor) {
+
+      // Parameter for constructor: Type name or this.name or super.name
+      // Parameter for method: Type name, final Type name, or required Type name
+      const prevToken = prevNonTrivia(tokens, i - 1)
+      const nextToken = nextNonTrivia(tokens, i + 1)
+      if (
+        t.kind === TokenKind.Identifier &&
+        prevToken &&
+        (prevToken.text === 'this.' ||
+          prevToken.text === 'super.' ||
+          (nextToken && (nextToken.text === ',' || nextToken.text === ')'))))
+      {
+        console.log('Found parameter:', t.text, 'in method/ctor', scope)
+        const node: Node = {
+          kind: NodeKind.Parameter,
+          name: t.text,
+          start: t.start,
+          end: t.end,
+          scope,
+        }
+        nodes.push(node)
+        scope.define({
+          name: node.name,
+          kind: SymbolKind.Parameter,
+          node,
+        })
+      }
     }
 
     // Leave scope on }
@@ -130,6 +159,15 @@ export function collect(tokens: Token[]) {
 
 function nextNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string): Token | undefined {
   for (let i = start; i < tokens.length; i++) {
+    const tok = tokens[i]
+    if (tok.kind === TokenKind.Whitespace || tok.kind === TokenKind.LineComment || tok.kind === TokenKind.BlockComment) continue
+    if ((!desiredKind || tok.kind === desiredKind) && (!value || tok.text === value)) return tok
+  }
+  return undefined
+}
+
+function prevNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string): Token | undefined {
+  for (let i = start; i >= 0; i--) {
     const tok = tokens[i]
     if (tok.kind === TokenKind.Whitespace || tok.kind === TokenKind.LineComment || tok.kind === TokenKind.BlockComment) continue
     if ((!desiredKind || tok.kind === desiredKind) && (!value || tok.text === value)) return tok

@@ -7,6 +7,7 @@ import { inferTypeFromTokens } from './infer'
 export interface Hover {
   range: { start: number; end: number }
   markdown: string
+  expectedValue?: string
   documentation?: string
 }
 
@@ -38,6 +39,10 @@ export function resolve(
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
+    const prev = prevNonTrivia(tokens, i - 1)
+    const next = nextNonTrivia(tokens, i + 1)
+    // console.log(tokens[i - 1], tokens[i], tokens[i + 1])
+    // console.log(scope)
 
     // Enter class scope
     if (t.kind === TokenKind.Keyword && t.text === 'class') {
@@ -45,6 +50,7 @@ export function resolve(
       if (nameTok) {
         const sym = rootScope.resolve(nameTok.text)
         if (sym?.node.scope) {
+          console.log('Entering class scope for', nameTok.text)
           scope = sym.node.scope
           currentClass = nameTok.text
         }
@@ -57,6 +63,38 @@ export function resolve(
       scope = scope.parent
       if (scope.kind === ScopeKind.File) currentClass = null
       continue
+    }
+
+    if (t.text === ';' || t.text === '{' && scope?.kind === ScopeKind.Constructor) {
+      if (scope.parent) {
+        scope = scope.parent
+        if (scope.kind === ScopeKind.File) currentClass = null
+      }
+      continue
+    }
+
+    if (scope.kind === ScopeKind.Constructor) {
+      // Parameter for constructor: Type name or this.name or super.name
+      // Parameter for method: Type name, final Type name, or required Type name
+      if (
+        t.kind === TokenKind.Identifier &&
+        prev &&
+        (prev.text === 'this.' ||
+          prev.text === 'super.' ||
+          (next && (next.text === ',' || next.text === ')'))))
+      {
+        console.log('Found parameter:', t.text, 'in method/ctor', scope)
+        const sym = scope.resolve(t.text)
+        console.log('Resolved to', sym)
+        if (sym) {
+          attachType(sym, tokens)
+          hovers.push({
+            range: { start: t.start, end: t.end },
+            expectedValue: t.text,
+            markdown: format(sym),
+          })
+        }
+      }
     }
 
     if (t.kind !== TokenKind.Identifier) continue
@@ -102,15 +140,35 @@ export function resolve(
       })
       continue
     }
-
     // simple identifier
-    const sym = scope.resolve(t.text) ?? rootScope.resolve(t.text)
+    let sym: SymbolEntry | undefined
+
+    // Prefer the class symbol when parsing the declaration itself
+    if (prev?.text === 'class') {
+      sym = rootScope.resolve(t.text)
+    }
+    // Treat call-like identifiers as constructor invocations when a matching constructor exists
+    else if (next?.text === '(') {
+      const classSym = rootScope.resolve(t.text)
+      const ctorSym = classSym?.node.scope?.resolve(t.text)
+      if (ctorSym?.kind === SymbolKind.Constructor) {
+        sym = ctorSym
+        if (ctorSym?.node.scope) {
+          scope = ctorSym.node.scope
+        }
+      } else {
+        sym = scope.resolve(t.text) ?? classSym ?? rootScope.resolve(t.text)
+      }
+    } else {
+      sym = scope.resolve(t.text) ?? rootScope.resolve(t.text)
+    }
+
     if (!sym) continue
     attachType(sym, tokens)
     hovers.push({
       range: { start: t.start, end: t.end },
       markdown: format(sym),
-        documentation: (sym.kind === SymbolKind.Field ? `Defined in \`${(sym as FieldSymbolEntry).parentClass}\`` : undefined),
+      documentation: (sym.kind === SymbolKind.Field ? `Defined in \`${(sym as FieldSymbolEntry).parentClass}\`` : undefined),
     })
   }
 
@@ -149,6 +207,16 @@ function dedupe(hovers: Hover[]): Hover[] {
     seen.add(key)
     return true
   })
+}
+
+function prevNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind): Token | undefined {
+  for (let i = start; i >= 0; i--) {
+    const tok = tokens[i]
+    if (tok.kind === TokenKind.Whitespace || tok.kind === TokenKind.LineComment || tok.kind === TokenKind.BlockComment) continue
+    if (!desiredKind || tok.kind === desiredKind) return tok
+    return undefined
+  }
+  return undefined
 }
 
 function nextNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind): Token | undefined {

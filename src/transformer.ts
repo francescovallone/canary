@@ -61,11 +61,15 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       const splittedParts = textNode.split(/\s/g)
       for (const part of splittedParts) {
         if (part === sanitized) {
+          const lengthMismatch = sanitized.length > (hover.range.end - hover.range.start)
+          const lengthDifference = sanitized.length - (hover.range.end - hover.range.start)
+          const expectedValue = hover.expectedValue || ''
+          normalizeSpan(sanitized, hover)
           const innerSpan: any = {
             type: 'element',
             tagName: 'span',
             properties: {},
-            children: [{ type: 'text', value: sanitized }],
+            children: [{ type: 'text', value: sanitized.substring(0, lengthMismatch ? sanitized.length - lengthDifference : sanitized.length) }],
           }
           const typeCode: Element = {
             type: 'element',
@@ -95,6 +99,9 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
             children: [innerSpan],
           }
           hast.children.push(wrapperDiv)
+          if (lengthMismatch) {
+            hast.children.push({ type: 'text', value: sanitized.substring(sanitized.length - lengthDifference) })
+          }
           continue;
         }
         hast.children.push({ type: 'text', value: part + ' '})
@@ -106,6 +113,30 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       isDart = false
     }
   }
+}
+
+function normalizeSpan(sanitized: string, hover: Hover): { adjustedText: string; pushBefore: string; pushAfter: string } {
+  let adjustedText = sanitized
+  let pushBefore = ''
+  let pushAfter = ''
+  const expected = hover.expectedValue || ''
+  if (expected !== sanitized) {
+    console.log(expected, sanitized, getMissingCharacters(sanitized, expected))
+  }
+  return { adjustedText, pushBefore, pushAfter }
+}
+
+function getMissingCharacters(actual: string, expected: string): { before: string; after: string } {
+  const greaterLength = Math.max(actual.length, expected.length)
+  for (let i = 0; i < greaterLength; i++) {
+    console.log('Comparing', actual[i], expected[i])
+    if (actual[i] !== expected[i]) {
+      const before = expected.substring(0, i)
+      const after = expected.substring(i)
+      return { before, after }
+    }
+  }
+  return { before: '', after: '' }
 }
 
 function findHoverForToken(token: ThemedToken, hovers: Hover[]) {

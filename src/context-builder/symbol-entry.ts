@@ -12,12 +12,13 @@ export interface FieldSymbolEntry extends SymbolEntry {
 }
 
 export enum SymbolKind {
-  Class,
-  Method,
-  Field,
-  Variable,
-  Parameter,
-  Property,
-  Function,
-  Constructor,
+  Class = 'class',
+  Method = 'method',
+  Field = 'field',
+  Variable = 'variable',
+  Parameter = 'parameter',
+  Property = 'property',
+  Function = 'function',
+  Constructor = 'constructor',
+  InstanceExpression = 'instance_expression',
 }

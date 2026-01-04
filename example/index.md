@@ -49,6 +49,12 @@ class Animal {
   }
 }
 class Dog extends Animal {
+  set bar(value: boolean) {
+      // do nothing
+  }
+  get bar(): boolean {
+      return true;
+  }
   constructor(name: string) {
     super(name);
     console.log(name);
