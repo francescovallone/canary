@@ -3,11 +3,14 @@ import { Scope } from "./scope"
 export enum NodeKind {
   File,
   Class,
+  Function,
   Field,
   Method,
   Constructor,
   Parameter,
   Variable,
+  Accessor,
+  TemplateString
 }
 
 export interface Node {

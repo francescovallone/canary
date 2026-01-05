@@ -3,6 +3,7 @@ import { collect } from './context-builder/collect'
 import { lex } from './context-builder/lexer'
 import { resolve, type Hover } from './context-builder/resolve'
 import { Element, ElementContent } from 'hast'
+import { CustomTypesConfig } from './define-types'
 
 interface CanaryMeta {
   canary?: { hovers: Hover[] }
@@ -16,6 +17,13 @@ export interface CanaryTransformerOptions {
    * @default false
    */
   explicitTrigger?: boolean,
+
+  /**
+   * Custom types to include in the analysis.
+   * These types will be merged with the built-in Dart types.
+   * You can use this to add types from your own libraries.
+   */
+  customTypes?: CustomTypesConfig
 }
 
 const isDartLang = (lang: string | undefined) => (lang ?? '').toLowerCase() === 'dart'
@@ -29,6 +37,7 @@ const getTriggerDirective = (meta: string): boolean => {
 
 export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTransformer {
   const explicitTrigger = options?.explicitTrigger ?? false
+  const customTypes = options?.customTypes
   let isDart = false
   return {
     name: 'canary',
@@ -39,7 +48,7 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       if (explicitTrigger && !trigger) return
       // Analyse on original code (with directives intact)
       const tokens = lex(code)
-      const { fileScope } = collect(tokens)
+      const { fileScope } = collect(tokens, customTypes?.types)
       const hovers = resolve(tokens, fileScope)
         ; (this.meta as CanaryMeta).canary = { hovers }
 
@@ -48,87 +57,80 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
     span(hast, _line, _col, _lineElement, token) {
       const meta = (this.meta as CanaryMeta).canary
       if (!meta || !meta.hovers?.length) return
-
       const hovers = findHoversForToken(token, meta.hovers)
       if (!hovers) return
 
-      const sanitized = token.content.replace(/\s+/g, '')
+      const segments = buildHoverSegments(token, hovers)
+      if (segments.length === 0) return
 
-      const currentChildren = [...(hast.children || [])]
-      hast.children = []
-      const textNode = (currentChildren[0] as any)?.value
-      if (!textNode || typeof textNode !== 'string') return
-      const splittedParts = textNode.split(/\s/g)
-      let hover = hovers[0];
-      for (const part of splittedParts) {
-        let normalized = normalizeSpan(part, hover)
-        if (!normalized) {
-          console.log('could not normalize', part, hover)
-          if (hovers.length > 1) {
-            console.log('trying another hover')
-            const otherHover = hovers[1];
-            normalized = normalizeSpan(part, otherHover)
-            console.log('trying another hover', part, otherHover)
-            if (normalized) {
-              hover = otherHover
-            } else {
-              const index = splittedParts.indexOf(part)
-              hast.children.push({ type: 'text', value: index === splittedParts.length - 1 ? ' ' + part : part + ' ' })
-              continue
-            }
-          } else {
-            const index = splittedParts.indexOf(part)
-            hast.children.push({ type: 'text', value: index === splittedParts.length - 1 ? ' ' + part : part + ' ' })
-            continue
-          }
+      const tokenText = token.content
+      const nextChildren: ElementContent[] = []
+      let cursor = 0
+      for (const segment of segments) {
+        if (cursor < segment.start) {
+          nextChildren.push({ type: 'text', value: tokenText.slice(cursor, segment.start) })
         }
-        const { adjustedText, pushBefore, pushAfter } = normalized
-        console.log('normalized', `part:${part}`, 'to', adjustedText, 'for hover', hover)
-        const indexOfPart = splittedParts.indexOf(part)
-        if (indexOfPart === splittedParts.length - 1 && splittedParts[indexOfPart - 1] !== '') {
-          hast.children.push({ type: 'text', value: ' ' })
+
+        const segmentText = tokenText.slice(segment.start, segment.end)
+        const normalized = normalizeSpan(segmentText, segment.hover) ?? {
+          adjustedText: segmentText,
+          pushBefore: '',
+          pushAfter: '',
         }
-        if (pushBefore.length > 0) {
-          hast.children.push({ type: 'text', value: pushBefore })
+
+        if (normalized.pushBefore.length > 0) {
+          nextChildren.push({ type: 'text', value: normalized.pushBefore })
         }
+
         const innerSpan: any = {
           type: 'element',
           tagName: 'span',
           properties: {},
-          children: [{ type: 'text', value: adjustedText }],
+          children: [{ type: 'text', value: normalized.adjustedText }],
         }
         const typeCode: Element = {
           type: 'element',
           tagName: 'code',
           properties: {},
           children: this.codeToHast(
-            hover.markdown,
+            segment.hover.markdown,
             {
               ...this.options,
               meta: {},
               transformers: [],
               lang: 'dart',
-              structure: hover.markdown.trim().includes('\n') ? 'classic' : 'inline',
+              structure: segment.hover.markdown.trim().includes('\n') ? 'classic' : 'inline',
             },
           ).children as ElementContent[],
         }
         typeCode.properties.className = 'canary-popup-code'
+
         const wrapperDiv: any = {
           type: 'element',
           tagName: 'div',
           properties: {
             className: mergeClass(undefined, 'dart-inspectable'),
             'data-dart-hover-code': encodeURIComponent(hastToHtml(typeCode)),
-            'data-dart-hover-docs': encodeURIComponent(hover.documentation || ''),
-            'data-dart-hover-range': `${hover.range.start}-${hover.range.end}`,
+            'data-dart-hover-docs': encodeURIComponent(segment.hover.documentation || ''),
+            'data-dart-hover-range': `${segment.hover.range.start}-${segment.hover.range.end}`,
           },
           children: [innerSpan],
         }
-        hast.children.push(wrapperDiv)
-        if (pushAfter.length > 0) {
-          hast.children.push({ type: 'text', value: pushAfter })
+
+        nextChildren.push(wrapperDiv)
+
+        if (normalized.pushAfter.length > 0) {
+          nextChildren.push({ type: 'text', value: normalized.pushAfter })
         }
+
+        cursor = segment.end
       }
+
+      if (cursor < tokenText.length) {
+        nextChildren.push({ type: 'text', value: tokenText.slice(cursor) })
+      }
+
+      hast.children = nextChildren
     },
     pre(hast) {
       if (!isDart) return
@@ -189,15 +191,24 @@ function getMissingCharacters(expected: string, sanitized: string): { before: st
 function findHoversForToken(token: ThemedToken, hovers: Hover[]): Hover[] | undefined {
   const start = token.offset
   const end = start + token.content.length
-  const hover = hovers.find(h => end > h.range.start && start < h.range.end);
-  if (!hover) {
-    return hover
-  }
-  const maybeAnotherToken = hovers.find(h => h !== hover && end > h.range.start && start < h.range.end);
-  if (maybeAnotherToken) {
-    return [hover, maybeAnotherToken]
-  }
-  return [hover];
+  const overlapping = hovers
+    .filter(h => end > h.range.start && start < h.range.end)
+    .sort((a, b) => a.range.start - b.range.start || a.range.end - b.range.end)
+  return overlapping.length > 0 ? overlapping : undefined
+}
+
+function buildHoverSegments(token: ThemedToken, hovers: Hover[]): Array<{ hover: Hover; start: number; end: number }> {
+  const length = token.content.length
+
+  return hovers
+    .map(hover => {
+      const start = Math.max(0, hover.range.start - token.offset)
+      const end = Math.min(length, hover.range.end - token.offset)
+      if (start >= end) return undefined
+      return { hover, start, end }
+    })
+    .filter((segment): segment is { hover: Hover; start: number; end: number } => Boolean(segment))
+    .sort((a, b) => a.start - b.start || a.end - b.end)
 }
 
 function mergeClass(existing: unknown, next: string): string | string[] {

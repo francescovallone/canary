@@ -5,6 +5,8 @@ export enum ScopeKind {
   Class,
   Method,
   Constructor,
+  Function,
+  Block,
 }
 
 

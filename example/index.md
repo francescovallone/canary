@@ -49,7 +49,7 @@ class Animal {
   }
 
   bark(): void {
-    console.log("Woof! Woof!");
+    console.log(`Woof! ${this.name}`);
   }
 
 }
@@ -67,4 +67,8 @@ class Dog extends Animal {
 }
 const myDog = new Dog("Buddy", "Golden Retriever");
 myDog.breed;
+
+function getDogBreed(dog: Dog) {
+  return dog.name;
+}
 ```

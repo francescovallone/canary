@@ -1,7 +1,6 @@
 import { Token, TokenKind } from './lexer'
 import { Scope, ScopeKind } from './scope'
-import { FieldSymbolEntry, SymbolEntry, SymbolKind, ParameterSymbolEntry } from './symbol-entry'
-import { Node } from './node'
+import { SymbolEntry, SymbolKind } from './symbol-entry'
 import { inferTypeFromTokens } from './infer'
 
 export interface Hover {
@@ -13,28 +12,60 @@ export interface Hover {
 
 
 function attachType(sym: SymbolEntry, tokens: Token[]) {
-  if (sym.type) return
-
+  if (sym.type !== undefined) return
   const node = sym.node
+  const checkAccessChain = sym.reference === undefined && (sym.kind === SymbolKind.Field || sym.kind === SymbolKind.Variable)
   const inferred = inferTypeFromTokens(
     tokens,
     node.initializerStart,
-    node.initializerEnd
+    node.initializerEnd,
+    checkAccessChain
   )
   if (inferred) {
+    if (checkAccessChain && inferred.includes('.')) {
+      // For access chains, only take the final property as the type
+      let currentScope = sym.node.scope
+      const parts = inferred.split('.')
+      for (let i = 0; i < parts.length; i++) {
+        let part = parts[i]
+        if (part.includes('(')) {
+          part = part.substring(0, part.indexOf('('))
+        }
+        const partSym = currentScope?.resolve(part)
+        if (partSym) {
+          if (i === parts.length - 1) {
+            sym.type = partSym.type
+            node.type = partSym.type
+          } else {
+            const classSym = partSym.node.scope.resolve(partSym.type || '');
+            if (!classSym) break;
+            currentScope = classSym.node.scope
+          }
+        }
+      }
+      if (sym.type !== undefined) {
+        return
+      }
+    }
     sym.type = inferred
     node.type = inferred
   }
-  console.log('attachType', sym.name, sym.type, node.initializerStart, node.initializerEnd)
-  if ('referenceType' in sym && sym.referenceType === 'this' && sym.kind === SymbolKind.Parameter) {
+  if (sym.reference === 'this' && sym.kind === SymbolKind.Parameter) {
     const classSym = sym.node.scope?.parent?.resolve(sym.name)
-    const param = sym as ParameterSymbolEntry
     if (classSym) {
-      param.type = classSym.type
-      param.parentClass = 'parentClass' in classSym ? (classSym as FieldSymbolEntry).parentClass : classSym.name
+      sym.type = classSym.type
+      sym.parentClass = classSym.parentClass ?? classSym.name
       node.type = classSym.type
     }
+    return
   }
+  if (sym.reference) {
+    const refSym = sym.node.scope?.resolve(sym.reference)
+    if (refSym && refSym.type === undefined) {
+      attachType(refSym, tokens)
+    }
+  }
+  
 }
 
 
@@ -70,7 +101,6 @@ export function resolve(
       if (scope.kind === ScopeKind.File) currentClass = null
       continue
     }
-
     if ((t.text === ';' || t.text === '}') && scope?.kind === ScopeKind.Constructor) {
       if (scope.parent) {
         scope = scope.parent
@@ -78,8 +108,7 @@ export function resolve(
       }
       continue
     }
-
-    if (scope.kind === ScopeKind.Constructor) {
+    if (scope.kind === ScopeKind.Constructor || scope.kind === ScopeKind.Method || scope.kind === ScopeKind.Function) {
       // Parameter for constructor: Type name or this.name or super.name
       // Parameter for method: Type name, final Type name, or required Type name
       if (
@@ -100,13 +129,45 @@ export function resolve(
       }
     }
 
+    if (t.kind === TokenKind.StringLiteral && (t.text.includes('${') || t.text.includes('$')) && (!t.text.startsWith('r') && prevNonTrivia(tokens, i - 1, TokenKind.Identifier)?.text !== 'r')) {
+      const templateInString = t.text.includes('$') ? t.text.match(/\$\{*([^}]+)\}*/g)?.map(m => {
+        const clean = m.startsWith('${') ? m.slice(2, -1) : m.slice(1)
+        if (clean.endsWith('"') || clean.endsWith("'")) {
+          return clean.slice(0, -1)
+        }
+        return clean.trim()
+      }) : []
+      if (templateInString) {
+        for (const expr of templateInString) {
+          let currentScope: Scope | undefined = scope
+          do {
+            const resolvedValue = currentScope.resolve(expr)
+            if (resolvedValue) {
+              attachType(resolvedValue, tokens)
+              console.log('Resolved template string expression:', expr, 'to', resolvedValue.type)
+              const exprOffset = t.text.indexOf(expr)
+              const exprStart = t.start + exprOffset
+              const exprEnd = exprStart + expr.length
+              hovers.push({
+                range: { start: exprStart, end: exprEnd },
+                markdown: format(resolvedValue),
+                expectedValue: expr,
+              })
+              break;
+            }
+            currentScope = currentScope?.parent
+          } while(currentScope?.parent)
+        }
+      }
+    }
+
     if (t.kind !== TokenKind.Identifier) continue
 
     // member access: a.b
     if (tokens[i - 1]?.text === '.') {
       const left = tokens[i - 2]
       if (!left) continue
-
+      
       // resolve the base symbol in current scope first, then file scope
       const baseSym = scope.resolve(left.text) ?? rootScope.resolve(left.text)
       if (!baseSym) continue
@@ -138,14 +199,13 @@ export function resolve(
       hovers.push({
         range: { start: t.start, end: t.end },
         markdown: format(member),
-        documentation: (member.kind === SymbolKind.Field ? `Defined in \`${(member as FieldSymbolEntry).parentClass}\`` : undefined),
+        documentation: (member.parentClass !== undefined ? `Declared in \`${member.parentClass}\`` : undefined),
         expectedValue: t.text,
       })
       continue
     }
     // simple identifier
     let sym: SymbolEntry | undefined
-
     // Prefer the class symbol when parsing the declaration itself
     if (prev?.text === 'class') {
       sym = rootScope.resolve(t.text)
@@ -153,7 +213,22 @@ export function resolve(
     // Treat call-like identifiers as constructor invocations when a matching constructor exists
     else if (next?.text === '(') {
       const classSym = rootScope.resolve(t.text)
+      if (classSym?.node.scope?.kind !== ScopeKind.Class) {
+        sym = scope.resolve(t.text) ?? rootScope.resolve(t.text)
+        if (sym) {
+          attachType(sym, tokens)
+          hovers.push({
+            range: { start: t.start, end: t.end },
+            markdown: format(sym),
+            documentation: (sym.parentClass !== undefined ? `Declared in \`${sym.parentClass}\`` : undefined),
+            expectedValue: t.text,
+          })
+          scope = sym.node.scope || scope
+        }
+        continue
+      }
       const ctorSym = classSym?.node.scope?.resolve(t.text)
+      let currentScope = scope
       if (ctorSym?.kind === SymbolKind.Constructor) {
         sym = ctorSym
         if (ctorSym?.node.scope) {
@@ -161,6 +236,18 @@ export function resolve(
         }
       } else {
         sym = scope.resolve(t.text) ?? classSym ?? rootScope.resolve(t.text)
+      }
+      if (scope.kind !== ScopeKind.Constructor) {
+        if (!sym) continue
+        attachType(sym, tokens)
+        hovers.push({
+          range: { start: t.start, end: t.end },
+          markdown: format(sym),
+          documentation: (sym.parentClass !== undefined ? `Declared in \`${sym.parentClass}\`` : undefined),
+          expectedValue: t.text,
+        })
+        scope = currentScope
+        continue
       }
     } else {
       sym = scope.resolve(t.text) ?? rootScope.resolve(t.text)
@@ -170,7 +257,7 @@ export function resolve(
     hovers.push({
       range: { start: t.start, end: t.end },
       markdown: format(sym),
-      documentation: (sym.kind === SymbolKind.Field ? `Defined in \`${(sym as FieldSymbolEntry).parentClass}\`` : undefined),
+      documentation: (sym.parentClass !== undefined ? `Declared in \`${sym.parentClass}\`` : undefined),
       expectedValue: t.text,
     })
   }
@@ -180,22 +267,25 @@ export function resolve(
 
 function format(sym: SymbolEntry): string {
   const type = sym.type ?? 'dynamic'
+  const parameters = sym.node.scope ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter) : []
   switch (sym.kind) {
     case SymbolKind.Class:
       return `\`class ${sym.name}\``
-
+    case SymbolKind.Variable:
     case SymbolKind.Field:
       return `${type} ${sym.name}`
-    case SymbolKind.Variable:
-      return `**${sym.name}**: \`${type}\``
     case SymbolKind.Parameter:
       return `${type} ${sym.name}`
+    case SymbolKind.Function:
     case SymbolKind.Method:
-      return `**${sym.name}**(): \`${type}\``
-
+      return `${type} ${sym.name}(${parameters.map(p => {
+        attachType(p, [])
+        const pType = p.type ?? p.node.type ?? 'dynamic'
+        return `${pType} ${p.name}`
+      }).join(',\n')})`
     case SymbolKind.Constructor:
-      const parameters = sym.node.scope ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter) : []
-      return `${sym.name}(${parameters.map(p => {
+      const modifier = sym.modifiers?.[0] === undefined ? '' : `${sym.modifiers?.join(' ')} `
+      return `${modifier}${sym.name}(${parameters.map(p => {
         attachType(p, [])
         const pType = p.type ?? p.node.type ?? 'dynamic'
         return `${pType} ${p.name}`

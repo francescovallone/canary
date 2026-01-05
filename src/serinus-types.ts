@@ -11,8 +11,12 @@ export const serinusTypes = defineCustomTypes({
       name: 'SerinusApplication',
       description: 'The main application class that bootstraps and runs the server.',
       members: {
-        serve: { type: 'Future<void>', description: 'Starts the HTTP server.' },
-        use: { type: 'void', description: 'Registers a global middleware or hook.' },
+        serve: { type: 'Future<void>', description: 'Starts the HTTP server.', parameters: []},
+        use: { type: 'void', description: 'Registers a global middleware or hook.', parameters: [{
+          type: 'Processable',
+          name: 'processable',
+          description: 'The middleware or hook to register.',
+        }] },
       },
     },
     {
@@ -31,6 +35,18 @@ export const serinusTypes = defineCustomTypes({
         imports: 'List<Module>',
         exports: 'List<Type>',
       },
+      constructors: [
+        {
+          name: 'Module',
+          description: 'Creates a new Module instance.',
+          parameters: [
+            { type: 'List<Controller>', name: 'controllers', description: 'The controllers to include in this module.' },
+            { type: 'List<Provider>', name: 'providers', description: 'The providers to include in this module.' },
+            { type: 'List<Module>', name: 'imports', description: 'Other modules to import.' },
+            { type: 'List<Type>', name: 'exports', description: 'Types to export from this module.' },
+          ]
+        }
+      ],
     },
     {
       name: 'Controller',

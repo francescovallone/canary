@@ -2,10 +2,14 @@ export interface CustomType {
   name: string
   description?: string
   extends?: string
-  members?: Record<string, string | { type: string; description?: string }>
-  staticMembers?: Record<string, string | { type: string; description?: string }>
-  constructors?: string[]
+  members?: Record<string, string | { type: string; description?: string } | {type: string; description?: string; parameters: Parameter[]}>
+  staticMembers?: Record<string, string | { type: string; description?: string } | {type: string; description?: string; parameters: Parameter[]}>
+  constructors?: Constructor[]
 }
+
+export type Parameter = { type: string; description?: string, name: string }
+
+export type Constructor = { description?: string; parameters: Parameter[], name?: string }
 
 export interface CustomTypesConfig {
   types: CustomType[]

@@ -5,15 +5,9 @@ export interface SymbolEntry {
   kind: SymbolKind
   type?: string
   node: Node
-}
-
-export interface FieldSymbolEntry extends SymbolEntry {
-  parentClass: string
-}
-
-export interface ParameterSymbolEntry extends SymbolEntry {
-  referenceType?: 'this' | 'super'
   parentClass?: string
+  modifiers?: string[]
+  reference?: string
 }
 
 export enum SymbolKind {
@@ -26,4 +20,6 @@ export enum SymbolKind {
   Function = 'function',
   Constructor = 'constructor',
   InstanceExpression = 'instance_expression',
+  Accessor = 'accessor',
+  TemplateString = 'template_string',
 }

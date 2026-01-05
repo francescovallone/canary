@@ -3,12 +3,15 @@ import { Token, TokenKind } from './lexer'
 export function inferTypeFromTokens(
   tokens: Token[],
   start?: number,
-  end?: number
+  end?: number,
+  accessChain: boolean = false
 ): string | undefined {
   if (start == null || end == null) return
 
   const slice = tokens.filter(
     t => t.start >= start && t.end <= end
+  ).filter(
+    t => t.kind !== TokenKind.Whitespace && (t.text !== '=')
   )
 
   if (slice.length === 0) return
@@ -34,6 +37,11 @@ export function inferTypeFromTokens(
 
   if (t.text === 'true' || t.text === 'false') {
     return 'bool'
+  }
+
+  if (accessChain) {
+    // Access chain inference: obj.prop.subprop
+    return slice.map(t => t.text).join('')  
   }
 
   return

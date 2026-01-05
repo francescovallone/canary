@@ -22,6 +22,8 @@ export interface Token {
 
 const keywordSet = new Set([
   'class',
+  'const',
+  'factory',
   'final',
   'var',
   'true',
