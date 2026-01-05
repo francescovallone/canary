@@ -11,6 +11,11 @@ export interface FieldSymbolEntry extends SymbolEntry {
   parentClass: string
 }
 
+export interface ParameterSymbolEntry extends SymbolEntry {
+  referenceType?: 'this' | 'super'
+  parentClass?: string
+}
+
 export enum SymbolKind {
   Class = 'class',
   Method = 'method',

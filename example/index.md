@@ -28,9 +28,9 @@ features:
 class Dog {
   final String name;
 
-  String get breed => "Unknown Breed"; 
+  final String breed; 
   
-  Dog(this.name, this.breed);
+  Dog(this.name, this.breed, color);
 
   void bark() {
     print("Woof! Woof!");
@@ -47,6 +47,11 @@ class Animal {
   constructor(name: string) {
     this.name = name;
   }
+
+  bark(): void {
+    console.log("Woof! Woof!");
+  }
+
 }
 class Dog extends Animal {
   set bar(value: boolean) {

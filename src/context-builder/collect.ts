@@ -4,7 +4,7 @@ import {
   NodeKind,
 } from './node'
 import { Scope, ScopeKind } from './scope'
-import { FieldSymbolEntry, SymbolKind } from './symbol-entry'
+import { FieldSymbolEntry, ParameterSymbolEntry, SymbolKind } from './symbol-entry'
 
 export function collect(tokens: Token[]) {
   const fileScope = new Scope(ScopeKind.File)
@@ -52,37 +52,36 @@ export function collect(tokens: Token[]) {
     ) {
       const nameTok = nextNonTrivia(tokens, i + 1, TokenKind.Identifier)
       if (!nameTok) continue
-        const type = nextNonTrivia(tokens, i + 1, TokenKind.Keyword)
-        let initStart: number | undefined
-        let initEnd: number | undefined
-        if (tokens[i + 2]?.text === '=') {
-            initStart = tokens[i + 3]?.start
-            let j = i + 3
-            while (tokens[j] && tokens[j].text !== ';') j++
-            initEnd = tokens[j - 1]?.end
-        }
+      const type = nextNonTrivia(tokens, i + 1, TokenKind.Keyword, undefined, TokenKind.Identifier)
+      let initStart: number | undefined
+      let initEnd: number | undefined
+      if (tokens[i + 2]?.text === '=') {
+        initStart = tokens[i + 3]?.start
+        let j = i + 3
+        while (tokens[j] && tokens[j].text !== ';') j++
+        initEnd = tokens[j - 1]?.end
+      }
 
-        const node: Node = {
-            kind: NodeKind.Field,
-            name: nameTok.text,
-            start: t.start,
-            end: nameTok.end,
-            scope,
-            type: type?.text,
-            initializerStart: initStart,
-            initializerEnd: initEnd,
-        }
+      const node: Node = {
+        kind: NodeKind.Field,
+        name: nameTok.text,
+        start: t.start,
+        end: nameTok.end,
+        scope,
+        type: type?.text ?? 'dynamic',
+        initializerStart: initStart,
+        initializerEnd: initEnd,
+      }
 
-        nodes.push(node)
+      nodes.push(node)
 
-        scope.define({
-            name: node.name,
-            kind: SymbolKind.Field,
-            node,
-            type: type?.text,
-            parentClass: currentClass!,
-        } as FieldSymbolEntry)
-        console.log(scope.symbols)
+      scope.define({
+        name: node.name,
+        kind: SymbolKind.Field,
+        node,
+        type: type?.text ?? 'dynamic',
+        parentClass: currentClass!,
+      } as FieldSymbolEntry)
     }
 
     // Method or constructor
@@ -97,7 +96,6 @@ export function collect(tokens: Token[]) {
         scope
       )
 
-      console.log('Found method/ctor:', t.text, 'isCtor:', isCtor, t.start, t.end)
       const node: Node = {
         kind: isCtor ? NodeKind.Constructor : NodeKind.Method,
         name: t.text,
@@ -128,22 +126,26 @@ export function collect(tokens: Token[]) {
         prevToken &&
         (prevToken.text === 'this.' ||
           prevToken.text === 'super.' ||
-          (nextToken && (nextToken.text === ',' || nextToken.text === ')'))))
-      {
-        console.log('Found parameter:', t.text, 'in method/ctor', scope)
+          (nextToken && (nextToken.text === ',' || nextToken.text === ')')))) {
+          const typeIdentifier = prevNonTrivia(tokens, i - 2, TokenKind.Keyword, undefined, TokenKind.Symbol)
         const node: Node = {
           kind: NodeKind.Parameter,
           name: t.text,
           start: t.start,
           end: t.end,
+          type: typeIdentifier?.text,
           scope,
         }
         nodes.push(node)
+        const referenceIdentifier = prevNonTrivia(tokens, i - 1, TokenKind.Identifier)
         scope.define({
           name: node.name,
           kind: SymbolKind.Parameter,
           node,
-        })
+          type: typeIdentifier?.text,
+          referenceType: referenceIdentifier?.text === 'this' ? 'this' :
+            referenceIdentifier?.text === 'super' ? 'super' : undefined,
+        } as ParameterSymbolEntry)
       }
     }
 
@@ -157,20 +159,22 @@ export function collect(tokens: Token[]) {
   return { fileScope, nodes }
 }
 
-function nextNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string): Token | undefined {
+function nextNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string, until?: TokenKind): Token | undefined {
   for (let i = start; i < tokens.length; i++) {
     const tok = tokens[i]
     if (tok.kind === TokenKind.Whitespace || tok.kind === TokenKind.LineComment || tok.kind === TokenKind.BlockComment) continue
     if ((!desiredKind || tok.kind === desiredKind) && (!value || tok.text === value)) return tok
+    if (until && tok.kind === until) return undefined
   }
   return undefined
 }
 
-function prevNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string): Token | undefined {
+function prevNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind, value?: string, until?: TokenKind): Token | undefined {
   for (let i = start; i >= 0; i--) {
     const tok = tokens[i]
     if (tok.kind === TokenKind.Whitespace || tok.kind === TokenKind.LineComment || tok.kind === TokenKind.BlockComment) continue
     if ((!desiredKind || tok.kind === desiredKind) && (!value || tok.text === value)) return tok
+    if (until && tok.kind === until) return undefined
   }
   return undefined
 }
