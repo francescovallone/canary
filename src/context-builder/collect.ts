@@ -132,14 +132,29 @@ export function collect(tokens: Token[], customTypes?: CustomType[]) {
 
     // Field: final Type name;
     // Field: final name = ...
+    // Field: Type name;
     if (
-      (t.text === 'final' || t.text === 'var') || (scope.kind !== ScopeKind.Class && t.text === 'const') ||
-      (scope.kind === ScopeKind.Class && t.kind === TokenKind.Keyword && t.text !== 'static' && t.text !== 'get' && t.text !== 'set') ||
-      (scope.kind === ScopeKind.Class && t.kind === TokenKind.Identifier)
+      (t.text === 'final' || t.text === 'var' || t.text === 'static') || 
+      (scope.kind !== ScopeKind.Class && t.text === 'const') ||
+      (t.kind === TokenKind.Keyword)
     ) {
       const nameTok = nextNonTrivia(tokens, i + 1, TokenKind.Identifier)
       if (!nameTok) continue
-      const type = nextNonTrivia(tokens, i + 1, TokenKind.Keyword, undefined, TokenKind.Identifier)
+      let type = undefined
+      let nullable = false
+      if (t.kind === TokenKind.Keyword && ['final', 'static', 'var', 'const'].includes(t.text)) {
+        type = nextNonTrivia(tokens, i + 1, TokenKind.Keyword, undefined, TokenKind.Identifier)
+        const nullabilityTok = nextNonTrivia(tokens, i + 2, TokenKind.Symbol, '?', TokenKind.Identifier)
+        if (nullabilityTok) {
+          nullable = true
+        }
+      } else {
+        type = t
+        const nullabilityTok = nextNonTrivia(tokens, i + 1, TokenKind.Symbol, '?', TokenKind.Identifier)
+        if (nullabilityTok) {
+          nullable = true
+        }
+      }
       let initStart: number | undefined
       let initEnd: number | undefined
       const equalTok = nextNonTrivia(tokens, i + 2, TokenKind.Symbol, '=')
@@ -159,6 +174,7 @@ export function collect(tokens: Token[], customTypes?: CustomType[]) {
         initializerStart: initStart,
         initializerEnd: initEnd,
         parentClass: currentClass ?? undefined,
+        nullable
       }
 
       nodes.push(node)

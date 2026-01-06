@@ -25,34 +25,15 @@ features:
 
 
 ```dart canary
-final details = [
-  (
-    title: 'Is it acceptable?',
-    content: 'Yes. It adheres to the WAI-ARIA design pattern.',
-  ),
-  (
-    title: 'Is it styled?',
-    content:
-        "Yes. It comes with default styles that matches the other components' aesthetic.",
-  ),
-  (
-    title: 'Is it animated?',
-    content:
-        "Yes. It's animated by default, but you can disable it if you prefer.",
-  ),
-];
+class Person {
+  String name;
+  int age;
 
-@override
-Widget build(BuildContext context) {
-  return ShadAccordion<({String content, String title})>(
-    children: details.map(
-      (detail) => ShadAccordionItem(
-        value: detail,
-        title: Text(detail.title),
-        child: Text(detail.content),
-      ),
-    ),
-  );
+  Person(this.name, this.age);
+
+  void greet() {
+    print('Hello, my name is $name and I am $age years old.');
+  }
 }
 ```
 

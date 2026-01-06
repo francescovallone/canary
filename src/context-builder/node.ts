@@ -37,6 +37,7 @@ export interface Node {
   modifiers?: string[]
   reference?: string
   documentation?: string
+  nullable?: boolean
 }
 
 export interface ExtendableNode extends Node {

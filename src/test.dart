@@ -1,5 +1,9 @@
+const dartExample = '';
+
 class Animal {
   final String species;
+
+  static data() => 'Dart Example';
 
   const Animal({this.species = 'Unknown'});
 
@@ -10,7 +14,7 @@ class Animal {
 
 /// A Dog class that extends Animal
 class Dog extends Animal {
-  final String name;
+  String name;
 
   Dog(this.name, {super.species}) : super(species: species);
 
