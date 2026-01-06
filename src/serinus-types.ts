@@ -16,6 +16,7 @@ export const serinusTypes = defineCustomTypes({
           type: 'Processable',
           name: 'processable',
           description: 'The middleware or hook to register.',
+          kind: 'positional',
         }] },
       },
     },
@@ -40,10 +41,10 @@ export const serinusTypes = defineCustomTypes({
           name: 'Module',
           description: 'Creates a new Module instance.',
           parameters: [
-            { type: 'List<Controller>', name: 'controllers', description: 'The controllers to include in this module.' },
-            { type: 'List<Provider>', name: 'providers', description: 'The providers to include in this module.' },
-            { type: 'List<Module>', name: 'imports', description: 'Other modules to import.' },
-            { type: 'List<Type>', name: 'exports', description: 'Types to export from this module.' },
+            { type: 'List<Controller>', name: 'controllers', description: 'The controllers to include in this module.', kind: 'named', defaultValue: 'const []' },
+            { type: 'List<Provider>', name: 'providers', description: 'The providers to include in this module.', kind: 'named', defaultValue: 'const []' },
+            { type: 'List<Module>', name: 'imports', description: 'Other modules to import.', kind: 'named', defaultValue: 'const []' },
+            { type: 'List<Type>', name: 'exports', description: 'Types to export from this module.', kind: 'named', defaultValue: 'const []' },
           ]
         }
       ],
@@ -161,5 +162,20 @@ export const serinusTypes = defineCustomTypes({
         close: { type: 'Future<void>', description: 'Closes the connection.' },
       },
     },
+    {
+      name: 'ShadAccordionItem',
+      description: 'An item within a ShadAccordion component.',
+      constructors: [
+        {
+          name: 'ShadAccordionItem',
+          description: 'Creates a new ShadAccordionItem instance.',
+          parameters: [
+            { type: 'T', name: 'value', description: 'The value of the accordion item.', kind: 'named', required: true },
+            { type: 'Widget', name: 'title', description: 'The title widget of the accordion item.', kind: 'named', required: true },
+            { type: 'Widget', name: 'child', description: 'The content widget of the accordion item.', kind: 'named', required: true },
+          ]
+        }
+      ]
+    }
   ],
 })

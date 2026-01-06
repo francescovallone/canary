@@ -25,19 +25,35 @@ features:
 
 
 ```dart canary
-class Dog {
-  final String name;
+final details = [
+  (
+    title: 'Is it acceptable?',
+    content: 'Yes. It adheres to the WAI-ARIA design pattern.',
+  ),
+  (
+    title: 'Is it styled?',
+    content:
+        "Yes. It comes with default styles that matches the other components' aesthetic.",
+  ),
+  (
+    title: 'Is it animated?',
+    content:
+        "Yes. It's animated by default, but you can disable it if you prefer.",
+  ),
+];
 
-  final String breed; 
-  
-  Dog(this.name, this.breed, color);
-
-  void bark() {
-    print("Woof! Woof!");
-  }
+@override
+Widget build(BuildContext context) {
+  return ShadAccordion<({String content, String title})>(
+    children: details.map(
+      (detail) => ShadAccordionItem(
+        value: detail,
+        title: Text(detail.title),
+        child: Text(detail.content),
+      ),
+    ),
+  );
 }
-final myDog = Dog("Buddy", "Golden Retriever");
-myDog.breed;
 ```
 
 ```ts twoslash

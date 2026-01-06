@@ -1,17 +1,24 @@
-class Dog {
-  final String name;
+class Animal {
+  final String species;
 
-  const Dog(this.name, color);
+  const Animal({this.species = 'Unknown'});
 
-  void bark() {
-    print("Woof! Woof!");
+  void makeSound() {
+    print("Some generic animal sound");
   }
 }
 
-getDogBreed(Dog dog) {
-  return dog.name;
-}
+/// A Dog class that extends Animal
+class Dog extends Animal {
+  final String name;
 
+  Dog(this.name, {super.species}) : super(species: species);
+
+  @override
+  void makeSound() {
+    print("Woof! Woof!");
+  }
+}
 String bark(String sound) {
     return "Woof! Woof! $sound";
   }

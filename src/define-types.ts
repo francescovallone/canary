@@ -7,7 +7,14 @@ export interface CustomType {
   constructors?: Constructor[]
 }
 
-export type Parameter = { type: string; description?: string, name: string }
+export type Parameter = { 
+  type: string; 
+  description?: string, 
+  name: string, 
+  kind: 'positional' | 'optionalPositional' | 'named'
+  defaultValue?: string,
+  required?: boolean
+}
 
 export type Constructor = { description?: string; parameters: Parameter[], name?: string }
 

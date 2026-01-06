@@ -1,13 +1,9 @@
-import { Node } from "./node";
+import { Node, ParameterKind } from "./node";
 
 export interface SymbolEntry {
   name: string
   kind: SymbolKind
-  type?: string
   node: Node
-  parentClass?: string
-  modifiers?: string[]
-  reference?: string
 }
 
 export enum SymbolKind {
