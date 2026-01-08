@@ -24,16 +24,98 @@ features:
 ---
 
 
-```dart canary
-class Person {
-  String name;
-  int age;
+```dart
+const dartExample = '';
 
-  Person(this.name, this.age);
+// Custom type definitions
+typedef StringCallback<T> = String Function(T name);
+typedef void VoidCallback();
+typedef IntMapper<T> = T Function(int value);
 
-  void greet() {
-    print('Hello, my name is $name and I am $age years old.');
+class Animal<T> {
+  final Owner species;
+
+  const Animal({this.species});
+
+  T makeSound(T value) {
+    print("Some generic animal sound");
+    return value;
   }
+}
+
+/// A Dog class that extends Animal
+class Dog extends Animal<String> {
+  StringCallback<String> name;
+
+  Dog(this.name, {super.species});
+
+}
+
+// Top-level functions
+String bark(String sound) {
+  return "Woof! Woof! $sound";
+}
+
+double doubleValue(int x) {
+  return x * 2;
+}
+
+class Owner {
+  final String ownerName;
+
+  Owner(this.ownerName);
+}
+
+
+void main() {
+  final myDog = Dog(
+    (String name) {
+      return name;
+    }, 
+    species: 'Canine'
+  );
+  (String data) {
+    print(data);
+  };
+  final result = myDog.name;
+  print('Dog name: $result');
+  final value = myDog.makeSound('Woof! Woof!');
+  
+  // Using top-level functions
+  final barkSound = bark('Hello');
+  final doubled = doubleValue(21);
+}
+```
+
+```dart canary
+final details = [
+  (
+    title: 'Is it acceptable?',
+    content: 'Yes. It adheres to the WAI-ARIA design pattern.',
+  ),
+  (
+    title: 'Is it styled?',
+    content:
+        "Yes. It comes with default styles that matches the other components' aesthetic.",
+  ),
+  (
+    title: 'Is it animated?',
+    content:
+        "Yes. It's animated by default, but you can disable it if you prefer.",
+  ),
+];
+
+@override
+Widget build(BuildContext context) {
+  return ShadAccordion<({String content, String title})>(
+    children: details.map(
+      (detail) => ShadAccordionItem(
+        value: detail,
+        title: Text(detail.title),
+        child: Text(detail.content),
+      ),
+    ),
+  );
 }
 ```
 

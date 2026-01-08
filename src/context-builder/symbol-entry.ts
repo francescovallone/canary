@@ -18,4 +18,5 @@ export enum SymbolKind {
   InstanceExpression = 'instance_expression',
   Accessor = 'accessor',
   TemplateString = 'template_string',
+  Typedef = 'typedef',
 }

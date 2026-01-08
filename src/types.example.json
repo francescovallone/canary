@@ -60,6 +60,26 @@
           "description": "Creates a plain text response."
         }
       }
+    },
+    {
+      "name": "Box",
+      "typeParameters": ["T"],
+      "description": "Simple generic container used to demonstrate type parameters.",
+      "members": {
+        "value": {
+          "type": "T",
+          "description": "The contained value of type T."
+        }
+      },
+      "constructors": [
+        {
+          "name": "Box",
+          "description": "Creates a box holding a value of type T.",
+          "parameters": [
+            { "type": "T", "name": "value", "kind": "positional" }
+          ]
+        }
+      ]
     }
   ]
 }

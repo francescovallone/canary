@@ -2,9 +2,22 @@ export interface CustomType {
   name: string
   description?: string
   extends?: string
-  members?: Record<string, string | { type: string; description?: string } | {type: string; description?: string; parameters: Parameter[]}>
-  staticMembers?: Record<string, string | { type: string; description?: string } | {type: string; description?: string; parameters: Parameter[]}>
+  typeParameters?: string[]
+  members?: Record<string, string | { type: string; description?: string; typeParameters?: string[] } | {type: string; description?: string; parameters: Parameter[]; typeParameters?: string[]}>
+  staticMembers?: Record<string, string | { type: string; description?: string; typeParameters?: string[] } | {type: string; description?: string; parameters: Parameter[]; typeParameters?: string[]}>
   constructors?: Constructor[]
+  kind?: 'class'
+  package?: string
+}
+
+export interface CustomFunction {
+  name: string
+  description?: string
+  returnType: string
+  parameters: Parameter[],
+  typeParameters?: string[]
+  kind?: 'function'
+  package?: string
 }
 
 export type Parameter = { 
@@ -19,7 +32,7 @@ export type Parameter = {
 export type Constructor = { description?: string; parameters: Parameter[], name?: string }
 
 export interface CustomTypesConfig {
-  types: CustomType[]
+  types: (CustomType | CustomFunction)[]
 }
 
 /**

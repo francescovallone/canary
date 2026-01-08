@@ -34,11 +34,15 @@ function attachType(sym: SymbolEntry, tokens: Token[]) {
         }
         const partSym = currentScope?.resolve(part)
         if (partSym) {
+          if (partSym.kind === SymbolKind.Class) {
+            currentScope = partSym.node.scope
+            continue
+          }
           if (i === parts.length - 1) {
             node.type = partSym.node.type
           } else {
             const classSym = partSym.node.scope.resolve(partSym.node.type || '');
-            if (!classSym) break;
+            if (!classSym) continue;
             currentScope = classSym.node.scope
           }
         }
@@ -46,7 +50,24 @@ function attachType(sym: SymbolEntry, tokens: Token[]) {
       if (node.type !== undefined) {
         return
       }
+      if (node.type === undefined) {
+        node.type = undefined
+        return
+      }
     }
+    /// Check if the inferred type is a valid type in the current scope or in the parent scopes
+    let currentScope: Scope | undefined = node.scope
+    let typeExists = false
+    while (currentScope) {
+      const typeSym = currentScope.resolve(inferred)
+      if (typeSym) {
+        typeExists = true
+        node.type = typeSym.node.type
+        break
+      }
+      currentScope = currentScope.parent
+    }
+    if (typeExists) return
     node.type = inferred
   }
   if (node.reference === 'this' && sym.kind === SymbolKind.Parameter) {
@@ -84,6 +105,10 @@ function attachType(sym: SymbolEntry, tokens: Token[]) {
     const refSym = node.scope?.resolve(node.reference)
     if (refSym && refSym.node.type === undefined) {
       attachType(refSym, tokens)
+    }
+    /// The type maybe still undefined here or not available in the snippet. Use the reference as a type fallback.
+    if(!refSym) {
+      node.type = node.reference
     }
   }
   
@@ -194,21 +219,25 @@ export function resolve(
       const baseSym = scope.resolve(left.text) ?? rootScope.resolve(left.text)
       if (!baseSym) continue
 
+      const baseTypeRef = parseTypeReference(baseSym.node.type)
       // Determine the member scope: prefer class scope from the base symbol's type
       let memberScope: Scope | undefined = baseSym.node.scope?.kind === ScopeKind.Class ? baseSym.node.scope : undefined
+      let classSym = baseSym.node.scope?.kind === ScopeKind.Class ? baseSym : undefined
 
-      if (!memberScope && baseSym.node.type) {
-        const classSym = rootScope.resolve(baseSym.node.type)
-        if (classSym && classSym.node.scope?.kind === ScopeKind.Class) {
-          memberScope = classSym.node.scope
+      if (!memberScope && baseTypeRef.base) {
+        const resolvedClassSym = rootScope.resolve(baseTypeRef.base)
+        if (resolvedClassSym && resolvedClassSym.node.scope?.kind === ScopeKind.Class) {
+          classSym = resolvedClassSym
+          memberScope = resolvedClassSym.node.scope
         }
       }
 
       // Fallback: if we are inside a class and base resolves to that class, use current class scope
       if (!memberScope && currentClass) {
-        const classSym = rootScope.resolve(currentClass)
-        if (classSym && classSym.node.scope?.kind === ScopeKind.Class) {
-          memberScope = classSym.node.scope
+        const classSymCurrent = rootScope.resolve(currentClass)
+        if (classSymCurrent && classSymCurrent.node.scope?.kind === ScopeKind.Class) {
+          classSym = classSymCurrent
+          memberScope = classSymCurrent.node.scope
         }
       }
       if (!memberScope) continue
@@ -216,12 +245,14 @@ export function resolve(
       const member = memberScope.resolve(t.text)
       if (!member) continue
 
-      attachType(member, tokens)
+      const mapping = buildTypeArgumentMap(classSym?.node.typeParameters, baseTypeRef.args)
+      const substitutedMember = applyTypeMapping(member, mapping)
 
+      attachType(substitutedMember, tokens)
       hovers.push({
         range: { start: t.start, end: t.end },
-        markdown: format(member),
-        documentation: (member.node.parentClass !== undefined ? `Declared in \`${member.node.parentClass}\`${member.node.documentation !== undefined ? `\n\n${member.node.documentation}` : ''}` : member.node.documentation),
+        markdown: format(substitutedMember),
+        documentation: (substitutedMember.node.parentClass !== undefined ? `Declared in \`${substitutedMember.node.parentClass}\`${substitutedMember.node.documentation !== undefined ? `\n\n${substitutedMember.node.documentation}` : ''}` : substitutedMember.node.documentation),
         expectedValue: t.text,
       })
       continue
@@ -290,59 +321,58 @@ export function resolve(
 function format(sym: SymbolEntry): string {
   const type = sym.node.type ?? 'dynamic'
   const parameters = sym.node.scope ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter) : []
-  const parametersByKind: { [key in ParameterKind]: SymbolEntry[] } = {
-    [ParameterKind.Positional]: [],
-    [ParameterKind.OptionalPositional]: [],
-    [ParameterKind.Named]: [],
+
+  const positional = parameters.filter(p => p.node.parameterKind === ParameterKind.Positional)
+  const optionalPositional = parameters.filter(p => p.node.parameterKind === ParameterKind.OptionalPositional)
+  const named = parameters.filter(p => p.node.parameterKind === ParameterKind.Named)
+
+  const paramLines: string[] = []
+
+  // Positional parameters (first, no enclosure)
+  for (const p of positional) {
+    attachType(p, [])
+    const pType = p.node.type ?? 'dynamic'
+    paramLines.push(`  ${pType}${p.node.nullable ? '?' : ''} ${p.name},`)
   }
-  parameters.forEach(p => {
-    if (p.node.parameterKind !== undefined) {
-      parametersByKind[p.node.parameterKind].push(p)
+
+  // Optional positional (second, enclosed in [])
+  if (optionalPositional.length > 0) {
+    paramLines.push('  [')
+    for (const p of optionalPositional) {
+      attachType(p, [])
+      const pType = p.node.type ?? 'dynamic'
+      paramLines.push(`    ${pType}${p.node.nullable ? '?' : ''} ${p.name}${p.node.defaultValue ? ` = ${p.node.defaultValue}` : ''},`)
     }
-  })
-  const sortedParameters: string [] = []
-  if (parametersByKind[ParameterKind.Positional].length > 0) {
-    const positionalParams: string[] = []
-    for (const p in parametersByKind[ParameterKind.Positional]) {
-      const index = parseInt(p)
-      const param = parametersByKind[ParameterKind.Positional][p]
-      attachType(param, [])
-      const pType = param.node.type ?? 'dynamic'
-      positionalParams.push(`${index === 0 && parametersByKind[ParameterKind.Positional].length > 2 ? '\n ' : ''}${pType}${param.node.nullable ? '?' : ''} ${param.name}`) 
+    // remove trailing comma on last inner param
+    if (paramLines[paramLines.length - 1].endsWith(',')) {
+      paramLines[paramLines.length - 1] = paramLines[paramLines.length - 1].replace(/,$/, '')
     }
-    sortedParameters.push(`${positionalParams.join(`,${parametersByKind[ParameterKind.Positional].length > 2 ? '\n ' : ' '}`)}`)
+    paramLines.push('  ],')
   }
-  if (parametersByKind[ParameterKind.OptionalPositional].length > 0) {
-    if (sortedParameters.length > 0) {
-      sortedParameters.push(',\n')
+
+  // Named parameters (last, enclosed in {})
+  if (named.length > 0) {
+    paramLines.push('  {')
+    for (const p of named) {
+      attachType(p, [])
+      const pType = p.node.type ?? 'dynamic'
+      const modifiers = (p.node.modifiers?.length ?? 0) > 0 ? p.node.modifiers?.join(' ') + ' ' : ''
+      paramLines.push(`    ${modifiers}${pType}${p.node.nullable ? '?' : ''} ${p.name}${p.node.defaultValue ? ` = ${p.node.defaultValue}` : ''},`)
     }
-    const optionalParams: string[] = []
-    for (const p in parametersByKind[ParameterKind.OptionalPositional]) {
-      const index = parseInt(p)
-      const param = parametersByKind[ParameterKind.OptionalPositional][p]
-      attachType(param, [])
-      const pType = param.node.type ?? 'dynamic'
-      optionalParams.push(`${index === 0 ? '\n ' : ''}${pType}${param.node.nullable ? '?' : ''} ${param.name}${param.node.defaultValue ? ` = ${param.node.defaultValue}` : ''}`) 
+    if (paramLines[paramLines.length - 1].endsWith(',')) {
+      paramLines[paramLines.length - 1] = paramLines[paramLines.length - 1].replace(/,$/, '')
     }
-    sortedParameters.push(`[${optionalParams.join(',\n ')}\n]`)
+    paramLines.push('  }')
   }
-  if (parametersByKind[ParameterKind.Named].length > 0) {
-    if (sortedParameters.length > 0) {
-      sortedParameters.push(',\n')
-    }
-    const namedParams: string[] = []
-    for (const p in parametersByKind[ParameterKind.Named]) {
-      const index = parseInt(p)
-      const param = parametersByKind[ParameterKind.Named][p]
-      attachType(param, [])
-      const pType = param.node.type ?? 'dynamic'
-      namedParams.push(`${index === 0 ? '\n ' : ''}${(param.node.modifiers?.length ?? 0) > 0 ? param.node.modifiers?.join(' ') + ' ' : ''}${pType}${param.node.nullable ? '?' : ''} ${param.name}${param.node.defaultValue ? ` = ${param.node.defaultValue}` : ''}`) 
-    }
-    sortedParameters.push(`{${namedParams.join(',\n ')}\n}`)
+
+  let parameterBlock = ''
+  if (paramLines.length > 0) {
+    parameterBlock = '\n' + paramLines.join('\n') + '\n'
   }
   switch (sym.kind) {
     case SymbolKind.Class:
       const additionalParts: string[] = []
+      const generics = renderTypeParams(sym.node.typeParameters)
       if ((sym.node.extendsTypes?.length ?? 0) > 0) {
         additionalParts.push(`extends ${sym.node.extendsTypes?.join(', ')}`)
       }
@@ -352,7 +382,7 @@ function format(sym: SymbolEntry): string {
       if ((sym.node.mixins?.length ?? 0) > 0) {
         additionalParts.push(`with ${sym.node.mixins?.join(', ')}`)
       }
-      return `\`class ${sym.name}${additionalParts.length > 0 ? ' ' + additionalParts.join(' ') : ''}\``
+      return `\`class ${sym.name}${generics}${additionalParts.length > 0 ? ' ' + additionalParts.join(' ') : ''}\``
     case SymbolKind.Variable:
     case SymbolKind.Field:
       return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}`
@@ -366,10 +396,11 @@ function format(sym: SymbolEntry): string {
       return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}`
     case SymbolKind.Function:
     case SymbolKind.Method:
-      return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}(${sortedParameters.join(', ')})`
+      return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
     case SymbolKind.Constructor:
       const modifier = sym.node.modifiers?.[0] === undefined ? '' : `${sym.node.modifiers?.join(' ')} `
-      return `${modifier}${sym.name}(${sortedParameters.join(', ')})`
+      console.log('modifier', modifier.length)
+      return `${modifier}${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
     default:
       return `**${sym.name}**`
   }
@@ -384,6 +415,86 @@ function dedupe(hovers: Hover[]): Hover[] {
     seen.add(key)
     return true
   })
+}
+
+function renderTypeParams(params?: string[]): string {
+  if (!params || params.length === 0) return ''
+  return `<${params.join(', ')}>`
+}
+
+function parseTypeReference(typeText?: string): { base: string; args: string[] } {
+  if (!typeText) return { base: '', args: [] }
+  const lt = typeText.indexOf('<')
+  if (lt === -1) return { base: typeText.trim(), args: [] }
+  const base = typeText.slice(0, lt).trim()
+  const rest = typeText.slice(lt + 1)
+  const lastGt = rest.lastIndexOf('>')
+  const inner = lastGt !== -1 ? rest.slice(0, lastGt) : rest
+  const args = splitTopLevel(inner).map(a => a.trim()).filter(Boolean)
+  return { base, args }
+}
+
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let depth = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '<') {
+      depth++
+      current += ch
+      continue
+    }
+    if (ch === '>') {
+      depth = Math.max(0, depth - 1)
+      current += ch
+      continue
+    }
+    if (ch === ',' && depth === 0) {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.length) parts.push(current)
+  return parts
+}
+
+function buildTypeArgumentMap(typeParameters?: string[], args?: string[]): Record<string, string> | undefined {
+  if (!typeParameters?.length || !args?.length) return undefined
+  const map: Record<string, string> = {}
+  for (let i = 0; i < typeParameters.length; i++) {
+    const param = typeParameters[i]
+    if (!param) continue
+    const arg = args[i]
+    if (arg) {
+      map[param] = arg
+    }
+  }
+  return Object.keys(map).length ? map : undefined
+}
+
+function substituteTypeParams(typeText: string, mapping?: Record<string, string>): string {
+  if (!mapping || !Object.keys(mapping).length) return typeText
+  let result = typeText
+  for (const [param, arg] of Object.entries(mapping)) {
+    const re = new RegExp(`\\b${param}\\b`, 'g')
+    result = result.replace(re, arg)
+  }
+  return result
+}
+
+function applyTypeMapping(sym: SymbolEntry, mapping?: Record<string, string>): SymbolEntry {
+  if (!mapping || !Object.keys(mapping).length) return sym
+  return {
+    ...sym,
+    node: {
+      ...sym.node,
+      type: sym.node.type ? substituteTypeParams(sym.node.type, mapping) : sym.node.type,
+      typeArguments: sym.node.typeArguments?.map(arg => substituteTypeParams(arg, mapping)),
+    }
+  }
 }
 
 function prevNonTrivia(tokens: Token[], start: number, desiredKind?: TokenKind): Token | undefined {

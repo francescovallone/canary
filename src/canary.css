@@ -21,7 +21,7 @@
 	position: absolute;
 	z-index: 40;
 	display: none;
-	max-width: 320px;
+	max-width: 600px;
 	border: 1px solid var(--canary-border-color);
 	background: var(--canary-popover-bg);
 	color: var(--canary-popover-color);
@@ -29,6 +29,10 @@
 	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
 	font-size: 0.875rem;
 	line-height: 1.4;
+}
+
+.canary-hover-popover pre {
+	margin: 0 !important;
 }
 
 .canary-hover-popover[data-visible='true'] {

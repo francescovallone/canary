@@ -10,7 +10,8 @@ export enum NodeKind {
   Parameter,
   Variable,
   Accessor,
-  TemplateString
+  TemplateString,
+  Typedef
 }
 
 export enum ParameterKind {
@@ -26,6 +27,8 @@ export interface Node {
   end: number
   scope: Scope
   type?: string
+  typeParameters?: string[]
+  typeArguments?: string[]
   initializerStart?: number
   initializerEnd?: number
   extendsTypes?: string[]
@@ -38,6 +41,7 @@ export interface Node {
   reference?: string
   documentation?: string
   nullable?: boolean
+  package?: string
 }
 
 export interface ExtendableNode extends Node {

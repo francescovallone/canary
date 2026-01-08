@@ -68,8 +68,6 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 
 	const wire = () => {
 		const nodes = document.querySelectorAll('.dart-inspectable')
-		console.log(`Canary: wiring ${nodes.length} nodes for hover`)
-		console.log(nodes)
 		nodes.forEach(node => {
 			if (wiredNodes.has(node)) return
 			wiredNodes.add(node)

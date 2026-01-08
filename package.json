@@ -11,6 +11,11 @@
     "vitepress": "2.0.0-alpha.15"
   },
   "devDependencies": {
-    "@types/hast": "^3.0.4"
+    "@types/hast": "^3.0.4",
+    "typescript": "^5.6.3",
+    "vitest": "^1.4.0"
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

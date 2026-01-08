@@ -1,7 +1,8 @@
 import { hastToHtml, type ShikiTransformer, type ThemedToken } from 'shiki'
-import { collect } from './context-builder/collect'
-import { lex } from './context-builder/lexer'
-import { resolve, type Hover } from './context-builder/resolve'
+import { DartLexer, Token as LexerToken } from './context-builder/lexer'
+import { DartParser } from './context-builder/parser'
+import { collectFromCST } from './context-builder/collect-from-cst'
+import { generateHoversFromCST, type Hover } from './context-builder/hover-from-cst'
 import { Element, ElementContent } from 'hast'
 import { CustomTypesConfig } from './define-types'
 
@@ -47,10 +48,17 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       isDart = true
       if (explicitTrigger && !trigger) return
       // Analyse on original code (with directives intact)
-      const tokens = lex(code)
-      const { fileScope } = collect(tokens, customTypes?.types)
-      const hovers = resolve(tokens, fileScope)
-        ; (this.meta as CanaryMeta).canary = { hovers }
+      const lexer = new DartLexer()
+      const tokens = lexer.tokenize(code)
+      const parser = new DartParser()
+      const cst = parser.parse(tokens)
+      
+      // Collect symbols from CST and build scope tree (inject custom types if provided)
+      const { fileScope } = collectFromCST(cst, customTypes?.types)
+      
+      // Generate hovers directly from CST (no shallow token-based resolution)
+      const hovers = generateHoversFromCST(cst, fileScope)
+      ;(this.meta as CanaryMeta).canary = { hovers }
 
       return code
     },
