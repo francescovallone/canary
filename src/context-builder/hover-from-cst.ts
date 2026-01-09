@@ -10,47 +10,12 @@ import { Token } from './lexer'
 import { Scope, ScopeKind } from './scope'
 import { SymbolEntry, SymbolKind } from './symbol-entry'
 import { Node, NodeKind, ParameterKind } from './node'
+import { CST } from './parser'
 
-// Helper to get type string from TypeAnnotation
-function typeAnnotationToString(type: any): string {
-  if (!type) return ''
-  if (type.kind === 'TypeAnnotation') {
-    let result = typeNameToString(type.typeName)
-    if (type.typeArguments) {
-      const args = type.typeArguments.types.map((t: any) => typeAnnotationToString(t)).join(', ')
-      result += `<${args}>`
-    }
-    if (type.isNullable) {
-      result += '?'
-    }
-    return result
-  }
-  return ''
-}
+class HoversGenerator {
 
-function typeNameToString(typeName: any): string {
-  if (!typeName) return ''
-  if (typeName.kind === 'FunctionTypeName') {
-    const returnType = typeAnnotationToString(typeName.returnType)
-    const params = typeName.parameters?.parameters?.map((p: any) => {
-      const pType = typeAnnotationToString(p.type)
-      return p.name ? `${pType} ${p.name.lexeme}` : pType
-    }).join(', ') ?? ''
-    return `${returnType} Function(${params})`
-  }
-  if (typeName.kind === 'RecordTypeName') {
-    const positional = (typeName.positionalFields ?? []).map((t: any) => typeAnnotationToString(t))
-    const named = (typeName.namedFields ?? []).map((field: any) => `${typeAnnotationToString(field.type)} ${field.name.lexeme}`)
-    const segments = [...positional]
-    if (named.length) {
-      segments.push(`{${named.join(', ')}}`)
-    }
-    return `(${segments.join(', ')})`
-  }
-  if (typeName.parts && typeName.parts.length > 0) {
-    return typeName.parts.map((p: Token) => p.lexeme).join('.')
-  }
-  return ''
+  
+
 }
 
 export interface Hover {
@@ -63,6 +28,109 @@ export interface Hover {
 export interface HoverContext {
   fileScope: Scope
   currentClass?: string
+  /** Expected type for contextual type inference (e.g., callback parameter types) */
+  expectedType?: string
+}
+
+/**
+ * Extract type arguments from a generic type string like "List<RecordType>" -> ["RecordType"]
+ */
+function extractTypeArguments(typeStr: string): string[] {
+  const match = typeStr.match(/<(.+)>$/)
+  if (!match) return []
+  // Parse the type arguments, handling nested generics and record types
+  const args: string[] = []
+  let depth = 0
+  let current = ''
+  for (const char of match[1]) {
+    if (char === '<' || char === '(') depth++
+    if (char === '>' || char === ')') depth--
+    if (char === ',' && depth === 0) {
+      args.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  if (current.trim()) args.push(current.trim())
+  return args
+}
+
+/**
+ * Get base type name from a generic type string like "List<RecordType>" -> "List"
+ */
+function getBaseTypeName(typeStr: string): string {
+  const idx = typeStr.indexOf('<')
+  return idx === -1 ? typeStr : typeStr.substring(0, idx)
+}
+
+/**
+ * Parse a function type string like "T Function(E)" into its components
+ * Returns { returnType, paramTypes } or null if not a function type
+ */
+function parseFunctionType(typeStr: string): { returnType: string; paramTypes: string[] } | null {
+  const match = typeStr.match(/^(.+?)\s+Function\((.*)?\)(\?)?$/)
+  if (!match) return null
+  const returnType = match[1].trim()
+  const paramsStr = match[2]?.trim() || ''
+  if (!paramsStr) return { returnType, paramTypes: [] }
+  // Parse parameters, handling nested generics
+  const paramTypes: string[] = []
+  let depth = 0
+  let current = ''
+  for (const char of paramsStr) {
+    if (char === '<' || char === '(') depth++
+    if (char === '>' || char === ')') depth--
+    if (char === ',' && depth === 0) {
+      paramTypes.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  if (current.trim()) paramTypes.push(current.trim())
+  return { returnType, paramTypes }
+}
+
+/**
+ * Build a type parameter substitution map from a parameterized type
+ * e.g., for "List<RecordType>" with List having type parameter E, returns { E: "RecordType" }
+ */
+function buildTypeArgumentMap(
+  targetType: string,
+  ctx: HoverContext
+): Map<string, string> {
+  const typeMap = new Map<string, string>()
+  const baseName = getBaseTypeName(targetType)
+  const typeArgs = extractTypeArguments(targetType)
+  
+  if (typeArgs.length === 0) return typeMap
+  
+  // Find the class definition to get its type parameters
+  const classSym = ctx.fileScope.resolve(baseName)
+  if (!classSym || classSym.kind !== SymbolKind.Class) return typeMap
+  
+  const typeParams = classSym.node.typeParameters || []
+  for (let i = 0; i < Math.min(typeParams.length, typeArgs.length); i++) {
+    typeMap.set(typeParams[i], typeArgs[i])
+  }
+  
+  return typeMap
+}
+
+/**
+ * Substitute type parameters in a type string using the given map
+ */
+function substituteTypeParams(typeStr: string, typeMap: Map<string, string>): string {
+  if (typeMap.size === 0) return typeStr
+  
+  let result = typeStr
+  for (const [param, arg] of typeMap) {
+    // Replace whole word occurrences of the type parameter
+    const regex = new RegExp(`\\b${param}\\b`, 'g')
+    result = result.replace(regex, arg)
+  }
+  return result
 }
 
 /**
@@ -398,7 +466,7 @@ function collectHoversFromVariable(
     })
   } else {
     // Fallback: still surface a hover with best-effort type text
-    const typeText = decl.type ? typeAnnotationToString(decl.type) : undefined
+    const typeText = decl.type ? CST.typeAnnotationToString(decl.type) : undefined
     hovers.push({
       range: { start: decl.name.start, end: decl.name.end },
       markdown: typeText ? `${typeText} ${varName}` : varName,
@@ -542,7 +610,8 @@ function collectHoversFromTypeName(
 
   if (typeName.kind === 'RecordTypeName') {
     // Hover for the whole record type
-    const display = typeNameToString(typeName)
+    const display = CST.typeNameToString(typeName)
+    console.log('Record type hover:', display)
     hovers.push({
       range: { start: typeName.range[0], end: typeName.range[1] },
       markdown: display,
@@ -551,7 +620,7 @@ function collectHoversFromTypeName(
 
     // Named fields get their own hover entries with their types
     for (const field of typeName.namedFields || []) {
-      const fieldType = typeAnnotationToString(field.type)
+      const fieldType = CST.typeAnnotationToString(field.type)
       const fieldDisplay = `${field.name.lexeme}: ${fieldType}`
       hovers.push({
         range: { start: field.name.start, end: field.name.end },
@@ -573,7 +642,7 @@ function collectHoversFromTypeName(
     const firstPart = typeName.parts[0]
     const typeLexeme = firstPart.lexeme
 
-    const typeArgs = typeName.typeArguments?.types?.map((t: any) => typeAnnotationToString(t)) ?? []
+    const typeArgs = typeName.typeArguments?.types?.map((t: any) => CST.typeAnnotationToString(t)) ?? []
 
     // Try to resolve the type in scope
     const sym = scope.resolve(typeLexeme) || ctx.fileScope.resolve(typeLexeme)
@@ -772,12 +841,40 @@ function collectHoversFromExpression(
       }
       break
     }
+    case 'StringLiteral':
+      console.log('String literal found:', expr)
+      if (expr.value.interpolations) {
+        for (const interp of expr.value.interpolations) {
+          collectHoversFromInterpolations(interp, scope, hovers, ctx)
+        }
+      }
+      break
     case 'CascadeExpression':
       collectHoversFromExpression(expr.target, scope, hovers, ctx)
       for (const section of expr.sections || []) {
         collectHoversFromExpression(section, scope, hovers, ctx)
       }
       break
+  }
+}
+
+function collectHoversFromInterpolations(interpolations: any[], scope: Scope, hovers: Hover[], ctx: HoverContext): void {
+  for (const interp of interpolations) {
+    let currentScope = scope
+    let sym: SymbolEntry | undefined
+    while (currentScope) {
+      sym = currentScope.resolve(interp.lexeme)
+      if (sym) break
+      currentScope = currentScope.parent
+    }
+    if (sym) {
+      hovers.push({
+        range: { start: interp.start, end: interp.end },
+        markdown: formatSymbol(sym),
+        expectedValue: interp.lexeme,
+        documentation: buildDocumentation(sym),
+      })
+    }
   }
 }
 
@@ -812,11 +909,10 @@ function collectHoversFromPropertyAccess(
   // Then try to resolve the property
   const propertyName = expr.propertyName?.lexeme
   if (!propertyName) return
-  
   // Get the type of the target and resolve the property in that type's scope
   const targetType = inferExpressionType(expr.target, scope, ctx)
   if (targetType) {
-    const propertySym = resolveClassMember(targetType, propertyName, ctx)
+    const propertySym = resolveTypeMember(targetType, propertyName, ctx)
     if (propertySym) {
       // Substitute inherited type parameters with concrete types from the child class
       const substitutedSym = formatSymbolWithInheritanceSubstitution(propertySym, targetType, ctx)
@@ -841,14 +937,24 @@ function collectHoversFromMethodCall(
 
   // Collect hovers from method name
   const methodName = expr.methodName?.lexeme
+  console.log('Method call found:', methodName)
   if (!methodName) return
   
   const targetType = inferExpressionType(expr.target, scope, ctx)
   
+  let methodSym: SymbolEntry | undefined
+  let typeArgMap = new Map<string, string>()
   if (targetType) {
-    const methodSym = resolveClassMember(targetType, methodName, ctx)
+    methodSym = resolveTypeMember(targetType, methodName, ctx)
+    const typeParams = methodSym?.node.typeParameters || []
     if (methodSym) {
-      // Substitute inherited type parameters with concrete types from the child class
+      // Build type argument map from the target type (e.g., List<RecordType> -> E=RecordType)
+      typeArgMap = buildTypeArgumentMap(targetType, ctx)
+      // Built type parameters from the method call (if any)
+      // e.g., obj.method<T1, T2>()
+      // It can also happen that the type is inferred from the return type of the method itself in cases like:
+      // obj.map((x) => x.someMethod()) where someMethod's return type determines T
+      
       const substitutedSym = formatSymbolWithInheritanceSubstitution(methodSym, targetType, ctx)
       hovers.push({
         range: { start: expr.methodName.start, end: expr.methodName.end },
@@ -859,15 +965,40 @@ function collectHoversFromMethodCall(
     }
   }
 
-  // Collect hovers from arguments
+  // Collect hovers from arguments with contextual type information
   if (expr.arguments?.arguments) {
+    // Get parameter types from the method symbol
+    const methodParams = methodSym?.node.scope
+      ? Array.from(methodSym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter)
+      : []
+    const positionalParams = methodParams.filter(p => p.node.parameterKind === ParameterKind.Positional)
+    
+    let argIndex = 0
     for (const arg of expr.arguments.arguments) {
+      let expectedType: string | undefined
+      
+      // Get the expected type for this argument position
+      if (arg.kind === 'PositionalArgument' || arg.kind !== 'NamedArgument') {
+        if (argIndex < positionalParams.length) {
+          let paramType = positionalParams[argIndex].node.type
+          // Substitute type parameters with concrete types from the target
+          if (paramType && typeArgMap.size > 0) {
+            paramType = substituteTypeParams(paramType, typeArgMap)
+          }
+          expectedType = paramType
+        }
+        argIndex++
+      }
+      
+      // Create a new context with the expected type
+      const argCtx = expectedType ? { ...ctx, expectedType } : ctx
+      
       if (arg.kind === 'NamedArgument') {
-        collectHoversFromExpression(arg.value, scope, hovers, ctx)
+        collectHoversFromExpression(arg.value, scope, hovers, argCtx)
       } else if (arg.kind === 'PositionalArgument') {
-        collectHoversFromExpression(arg.expression, scope, hovers, ctx)
+        collectHoversFromExpression(arg.expression, scope, hovers, argCtx)
       } else {
-        collectHoversFromExpression(arg, scope, hovers, ctx)
+        collectHoversFromExpression(arg, scope, hovers, argCtx)
       }
     }
   }
@@ -887,7 +1018,11 @@ function collectHoversFromFunctionCall(
       // This is a constructor call - find the constructor and show its signature
       const constructorSym = sym.node.scope?.resolve(sym.name)
       if (constructorSym?.kind === SymbolKind.Constructor) {
-        const formattedSig = formatSymbolWithGenericSubstitution(constructorSym, expr.arguments, scope, ctx)
+        // Pass explicit type arguments from the constructor call (e.g., List<RecordType>)
+        const explicitTypeArgs = expr.target.typeArguments
+        console.log('Constructor symbol found for hover:', explicitTypeArgs)
+        const formattedSig = formatSymbolWithGenericSubstitution(constructorSym, expr.arguments, scope, ctx, explicitTypeArgs)
+        console.log('Constructor hover:', formattedSig)
         hovers.push({
           range: { start: expr.target.name.start, end: expr.target.name.end },
           markdown: formattedSig,
@@ -896,6 +1031,7 @@ function collectHoversFromFunctionCall(
         })
       } else {
         // Fallback to just showing class
+        console.log('Class hover (no constructor):', formatSymbol(sym))
         hovers.push({
           range: { start: expr.target.name.start, end: expr.target.name.end },
           markdown: formatSymbol(sym),
@@ -941,9 +1077,28 @@ function collectHoversFromFunctionExpression(
   // Build the function signature and create a temporary scope for parameters
   const funcScope = new Scope(ScopeKind.Function, scope)
   const params: string[] = []
+  
+  // Parse the expected function type to get expected parameter types
+  let expectedParamTypes: string[] = []
+  if (ctx.expectedType) {
+    const parsedFuncType = parseFunctionType(ctx.expectedType)
+    if (parsedFuncType) {
+      expectedParamTypes = parsedFuncType.paramTypes
+    }
+  }
+  
   if (expr.parameters?.parameters) {
+    let paramIndex = 0
     for (const param of expr.parameters.parameters) {
-      const paramType = param.type ? typeAnnotationToString(param.type) : 'dynamic'
+      // Use explicit type if provided, otherwise use expected type from context, otherwise 'dynamic'
+      let paramType: string
+      if (param.type) {
+        paramType = CST.typeAnnotationToString(param.type)
+      } else if (paramIndex < expectedParamTypes.length) {
+        paramType = expectedParamTypes[paramIndex]
+      } else {
+        paramType = 'dynamic'
+      }
       const paramName = param.name.lexeme
       params.push(`${paramType} ${paramName}`)
       
@@ -977,6 +1132,8 @@ function collectHoversFromFunctionExpression(
       if (param.type) {
         collectHoversFromType(param.type, scope, hovers, ctx)
       }
+      
+      paramIndex++
     }
   }
   
@@ -1023,12 +1180,13 @@ function inferReturnTypeFromBlock(body: any, scope: Scope, ctx: HoverContext): s
 }
 
 /**
- * Resolve a class member by name, traversing the inheritance hierarchy
+ * Resolve a type member by name, traversing the inheritance hierarchy
+ * It includes also Record types and their fields
  */
-function resolveClassMember(className: string, memberName: string, ctx: HoverContext): SymbolEntry | undefined {
+function resolveTypeMember(typeName: string, memberName: string, ctx: HoverContext): SymbolEntry | undefined {
   const visited = new Set<string>()
   
-  function searchInClass(typeName: string): SymbolEntry | undefined {
+  function searchInType(typeName: string): SymbolEntry | undefined {
     if (visited.has(typeName)) return undefined
     visited.add(typeName)
     if (typeName.includes('<')) {
@@ -1043,20 +1201,20 @@ function resolveClassMember(className: string, memberName: string, ctx: HoverCon
     
     // Check in parent classes (extends)
     for (const parentType of typeSym.node.extendsTypes ?? []) {
-      const found = searchInClass(parentType)
+      const found = searchInType(parentType)
       if (found) return found
     }
     
     // Check in mixins
     for (const mixinType of typeSym.node.mixins ?? []) {
-      const found = searchInClass(mixinType)
+      const found = searchInType(mixinType)
       if (found) return found
     }
     
     return undefined
   }
   
-  return searchInClass(className)
+  return searchInType(typeName)
 }
 
 // Helper to infer the type of an expression (simplified)
@@ -1071,7 +1229,7 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
     case 'PropertyAccess': {
       const targetType = inferExpressionType(expr.target, scope, ctx)
       if (targetType) {
-        const propSym = resolveClassMember(targetType, expr.propertyName?.lexeme, ctx)
+        const propSym = resolveTypeMember(targetType, expr.propertyName?.lexeme, ctx)
         return propSym?.node.type
       }
       return undefined
@@ -1095,7 +1253,7 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
       // Infer return type from the method
       const targetType = inferExpressionType(expr.target, scope, ctx)
       if (targetType) {
-        const methodSym = resolveClassMember(targetType, expr.methodName?.lexeme, ctx)
+        const methodSym = resolveTypeMember(targetType, expr.methodName?.lexeme, ctx)
         if (methodSym?.node.type) {
           // Apply inheritance type substitution to the return type
           const typeMap = buildInheritanceTypeMap(methodSym, targetType, ctx)
@@ -1115,7 +1273,7 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
       const params: string[] = []
       if (expr.parameters?.parameters) {
         for (const param of expr.parameters.parameters) {
-          const paramType = param.type ? typeAnnotationToString(param.type) : 'dynamic'
+          const paramType = param.type ? CST.typeAnnotationToString(param.type) : 'dynamic'
           const paramName = param.name?.lexeme
           params.push(paramType)
           
@@ -1157,7 +1315,7 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
     case 'ListLiteral':
       // Try to infer generic argument if present or from first element
       if (expr.typeArguments?.types?.[0]) {
-        const inner = typeAnnotationToString(expr.typeArguments.types[0])
+        const inner = CST.typeAnnotationToString(expr.typeArguments.types[0])
         return inner ? `List<${inner}>` : 'List<dynamic>'
       }
       const first = (expr.elements || [])[0]
@@ -1169,8 +1327,8 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
     case 'MapLiteral':
       // Try to infer key/value generic args
       if (expr.typeArguments?.types?.length === 2) {
-        const k = typeAnnotationToString(expr.typeArguments.types[0]) || 'dynamic'
-        const v = typeAnnotationToString(expr.typeArguments.types[1]) || 'dynamic'
+        const k = CST.typeAnnotationToString(expr.typeArguments.types[0]) || 'dynamic'
+        const v = CST.typeAnnotationToString(expr.typeArguments.types[1]) || 'dynamic'
         return `Map<${k}, ${v}>`
       }
       const firstEntry = (expr.entries || [])[0]
@@ -1182,7 +1340,7 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
       return 'Map<dynamic, dynamic>'
     case 'SetLiteral':
       if (expr.typeArguments?.types?.[0]) {
-        const inner = typeAnnotationToString(expr.typeArguments.types[0])
+        const inner = CST.typeAnnotationToString(expr.typeArguments.types[0])
         return inner ? `Set<${inner}>` : 'Set<dynamic>'
       }
       const firstSet = (expr.elements || [])[0]
@@ -1210,12 +1368,18 @@ function getTypeBaseName(type: any): string {
 // Formatting functions (kept from original resolve.ts)
 /**
  * Format a symbol with generic type substitution based on actual arguments
+ * @param sym The symbol to format
+ * @param argList The argument list from the function call
+ * @param scope The current scope
+ * @param ctx The hover context
+ * @param explicitTypeArgs Explicit type arguments from the call site (e.g., ShadAccordionItem<RecordType>)
  */
 function formatSymbolWithGenericSubstitution(
   sym: SymbolEntry,
   argList: any,
   scope: Scope,
-  ctx: HoverContext
+  ctx: HoverContext,
+  explicitTypeArgs?: any
 ): string {
   // If no type parameters, just use the regular format
   if (!sym.node.typeParameters || sym.node.typeParameters.length === 0) {
@@ -1226,6 +1390,15 @@ function formatSymbolWithGenericSubstitution(
   const typeMap = new Map<string, string>()
   const typeParams = sym.node.typeParameters
   
+  // First, use explicit type arguments if provided (e.g., ShadAccordionItem<RecordType>)
+  if (explicitTypeArgs?.types) {
+    for (let i = 0; i < Math.min(explicitTypeArgs.types.length, typeParams.length); i++) {
+      const explicitType = CST.typeAnnotationToString(explicitTypeArgs.types[i])
+      if (explicitType) {
+        typeMap.set(typeParams[i], explicitType)
+      }
+    }
+  }
   // Get the parameters of the method
   const parameters = sym.node.scope 
     ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter)
@@ -1237,6 +1410,7 @@ function formatSymbolWithGenericSubstitution(
   let argIndex = 0
   
   for (const arg of args) {
+    console.log('Processing argument:', arg)
     if (arg.kind === 'PositionalArgument' && argIndex < positionalParams.length) {
       const param = positionalParams[argIndex]
       const paramType = param.node.type
@@ -1282,7 +1456,8 @@ function formatSymbolWithGenericSubstitution(
  */
 function formatSymbolWithSubstitution(sym: SymbolEntry, typeMap: Map<string, string>): string {
   const substituteType = (type: string): string => {
-    const substituted = typeMap.get(type) ?? type
+    // Use substituteTypeParams for proper nested type substitution (e.g., List<T> -> List<RecordType>)
+    const substituted = substituteTypeParams(type, typeMap)
     return resolveTypeAlias(substituted, sym.node.scope?.parent)
   }
   
@@ -1408,19 +1583,32 @@ function buildInheritanceTypeMap(
  * Format a symbol with inherited type parameter substitution
  * For members inherited from generic parent classes, substitute the parent's type parameters
  * with the concrete types from the child class's extends clause
+ * Also handles direct generic types like List<RecordType> where E->RecordType
  */
 function formatSymbolWithInheritanceSubstitution(
   sym: SymbolEntry,
   childClassName: string,
   ctx: HoverContext
 ): string {
+  // First, check if childClassName has type arguments (e.g., List<RecordType>)
+  const baseChildName = getBaseTypeName(childClassName)
+  const childTypeArgs = extractTypeArguments(childClassName)
+  
+  // If the target type has type arguments, build a substitution map from those
+  if (childTypeArgs.length > 0) {
+    const typeMap = buildTypeArgumentMap(childClassName, ctx)
+    if (typeMap.size > 0) {
+      return formatSymbolWithSubstitution(sym, typeMap)
+    }
+  }
+  
   // If the symbol is not from a parent class, just format normally
-  if (!sym.node.parentClass || sym.node.parentClass === childClassName) {
+  if (!sym.node.parentClass || sym.node.parentClass === baseChildName) {
     return formatSymbol(sym)
   }
   
   // Get the child class to find its extends clause
-  const childClassSym = ctx.fileScope.resolve(childClassName)
+  const childClassSym = ctx.fileScope.resolve(baseChildName)
   if (!childClassSym || childClassSym.kind !== SymbolKind.Class) {
     return formatSymbol(sym)
   }
@@ -1562,6 +1750,7 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
   if (paramLines.length > 0) {
     parameterBlock = '\n' + paramLines.join('\n') + '\n'
   }
+  console.log('Formatting symbol:', sym.name, sym.kind)
   switch (sym.kind) {
     case SymbolKind.Class:
       const additionalParts: string[] = []
@@ -1596,6 +1785,7 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
     
     case SymbolKind.Function:
     case SymbolKind.Method:
+      console.log('Formatting method/function symbol:', sym.node.scope.symbols)
       return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
     
     case SymbolKind.Constructor:
@@ -1642,11 +1832,12 @@ function buildDocumentation(sym: SymbolEntry): string | undefined {
     if (sym.node.package) declared += ` in \`${sym.node.package}\``
     parts.push(declared)
   }
+  console.log(sym.node.package);
+  if (sym.node.package && !sym.node.parentClass) {
+    parts.push(`Declared in \`${sym.node.package}\``)
+  }
   
   if (sym.node.documentation) {
-    if (parts.length > 0) {
-      parts.push('')
-    }
     parts.push(sym.node.documentation)
   }
   
@@ -1682,5 +1873,33 @@ function resolveInheritanceType(typeName: string, scope: Scope | undefined): str
   }
   
   return typeName
+}
+
+function resolveRecordField(targetType: string, propertyName: any, scope: Scope | undefined, ctx: HoverContext) : SymbolEntry | undefined {
+  // Extract the record field definitions from the target type
+  let recordSym: SymbolEntry | undefined = undefined
+  if (scope) {
+    let currentScope = scope
+    while (currentScope) {
+      recordSym = currentScope.resolve(targetType)
+      if (recordSym) {
+        break
+      }
+      currentScope = currentScope.parent
+    }
+  }
+  console.log('Record symbol for type', targetType, ':', recordSym)
+  if (!recordSym || recordSym.kind !== SymbolKind.TypeLiteral) {
+    recordSym = ctx.fileScope.resolve(targetType)
+    if (!recordSym || recordSym.kind !== SymbolKind.TypeLiteral) {
+      return undefined
+    }
+  }
+  console.log(recordSym.node.scope.symbols)
+  const propertySym = recordSym.node.scope.resolve(propertyName.lexeme)
+  // Look for the field in the record's members
+  if (propertySym) {
+    return propertySym
+  }
 }
 

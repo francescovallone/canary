@@ -39,5 +39,8 @@ describe('record and list hovers', () => {
     const detailsHover = hovers.find(h => h.expectedValue === 'details')
     expect(detailsHover).toBeDefined()
     expect(detailsHover?.markdown).toContain('List<({String title, String content})>')
+    const titleHover = hovers.find(h => h.expectedValue === 'title')
+    expect(titleHover).toBeDefined()
+    expect(titleHover?.markdown).toContain('String title')
   })
 })

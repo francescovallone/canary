@@ -1,5 +1,35 @@
 import { Scope } from "./scope"
 
+export type TypeKind = 'simple' | 'generic' | 'function' | 'nullable' | 'never' | 'void' | 'dynamic';
+
+export interface Type {
+  kind: TypeKind
+  name?: string
+  typeParameters?: Type[]
+  typeArguments?: Type[]
+  returnType?: Type
+  baseType?: Type
+}
+
+export interface InferenceVariable {
+  id: string;
+  constraints: Type[];
+  resolved?: Type;
+}
+
+export interface InferenceResult {
+  inferredType: Type;
+  errors: InferenceError[];
+}
+
+export interface InferenceError {
+  kind: 'mismatch' | 'signature_error' | 'inference_failed' | 'bound_violation';
+  message: string;
+  node: Node;
+  expected?: Type;
+  actual?: Type;
+}
+
 export enum NodeKind {
   File,
   Class,
@@ -11,7 +41,8 @@ export enum NodeKind {
   Variable,
   Accessor,
   TemplateString,
-  Typedef
+  Typedef,
+  RecordTypeLiteral,
 }
 
 export enum ParameterKind {

@@ -3,7 +3,7 @@ export interface CustomType {
   description?: string
   extends?: string
   typeParameters?: string[]
-  members?: Record<string, string | { type: string; description?: string; typeParameters?: string[] } | {type: string; description?: string; parameters: Parameter[]; typeParameters?: string[]}>
+  members?: Record<string, string | { type: string; description?: string; typeParameters?: string[] } | {type: string; description?: string; parameters: Parameter[]; typeParameters?: string[], returnType?: string }>
   staticMembers?: Record<string, string | { type: string; description?: string; typeParameters?: string[] } | {type: string; description?: string; parameters: Parameter[]; typeParameters?: string[]}>
   constructors?: Constructor[]
   kind?: 'class'
@@ -29,7 +29,7 @@ export type Parameter = {
   required?: boolean
 }
 
-export type Constructor = { description?: string; parameters: Parameter[], name?: string }
+export type Constructor = { description?: string; parameters: Parameter[], name?: string, typeParameters?: string[], typeArguments?: string[] }
 
 export interface CustomTypesConfig {
   types: (CustomType | CustomFunction)[]

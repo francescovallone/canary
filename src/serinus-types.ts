@@ -251,6 +251,21 @@ export const serinusTypes = defineCustomTypes({
       },
     },
     {
+      name: 'ShadAccordion',
+      description: 'A widget that displays a list of expandable accordion items.',
+      typeParameters: ['T'],
+      constructors: [
+        {
+          name: 'ShadAccordion',
+          description: 'Creates a new ShadAccordion instance.',
+          parameters: [
+            { type: 'List<ShadAccordionItem<T>>', name: 'children', description: 'The list of accordion items.', kind: 'named', required: true, },
+          ],
+          typeParameters: ['T'],
+        }
+      ]
+    },
+    {
       name: 'ShadAccordionItem',
       description: 'An item within a ShadAccordion component.',
       typeParameters: ['T'],
@@ -262,7 +277,8 @@ export const serinusTypes = defineCustomTypes({
             { type: 'T', name: 'value', description: 'The value of the accordion item.', kind: 'named', required: true },
             { type: 'Widget', name: 'title', description: 'The title widget of the accordion item.', kind: 'named', required: true },
             { type: 'Widget', name: 'child', description: 'The content widget of the accordion item.', kind: 'named', required: true },
-          ]
+          ],
+          typeParameters: ['T']
         }
       ]
     }

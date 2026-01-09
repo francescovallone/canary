@@ -143,7 +143,7 @@ export class DartLexer {
     return tokens;
   }
   
-  private scanToken(): Token | null {
+  private scanToken(interpolationStart?: number): Token | null {
     const c = this.advance();
     
     // Whitespace - skip but track position
@@ -185,7 +185,8 @@ export class DartLexer {
     
     // Identifiers and keywords
     if (this.isAlpha(c) || c === '_' || c === '$') {
-      return this.identifier();
+      console.log('Starting identifier scan at:', c);
+      return this.identifier(interpolationStart);
     }
     
     // Operators and punctuation
@@ -401,9 +402,8 @@ export class DartLexer {
     }
     const endPattern = isMultiline ? quote + quote + quote : quote;
     
-    let value = '';
     const interpolations: Token[][] = [];
-    
+    console.log('Starting string scan, multiline:', quote);
     while (!this.isAtEnd()) {
       // Check for end
       if (this.matchSequence(endPattern)) {
@@ -413,16 +413,18 @@ export class DartLexer {
       // Check for interpolation
       if (this.peek() === '$') {
         this.advance(); // consume $
-        
+        const start = this.current
+        console.log('Peek after $:', this.peek());
         if (this.peek() === '{') {
           // ${expression} - need to tokenize the expression
           this.advance(); // consume {
-          const exprTokens = this.scanInterpolation();
+          const exprTokens = this.scanInterpolation(start + 1);
+          console.log('Completed interpolation:', exprTokens);
           interpolations.push(exprTokens);
           continue;
         } else if (this.isAlpha(this.peek()) || this.peek() === '_') {
           // $identifier - simple form
-          const ident = this.identifier();
+          const ident = this.identifier(start);
           interpolations.push([ident]);
           continue;
         }
@@ -450,34 +452,32 @@ export class DartLexer {
     }
     
     const token = this.makeToken(TokenType.STRING, this.source.substring(this.start, this.current));
+    console.log('Completed string token:', token);
     if (interpolations.length > 0) {
       token.interpolations = interpolations;
     }
+    console.log('String token with interpolations:', token.interpolations);
     return token;
   }
 
-  private scanInterpolation(): Token[] {
-    // Scan tokens until we find the matching }
+  private scanInterpolation(startInterpolation: number): Token[] {
     const tokens: Token[] = [];
     let braceDepth = 1;
-    
+
     while (!this.isAtEnd() && braceDepth > 0) {
-      const token = this.scanToken();
-      if (token) {
-        tokens.push(token);
-        
-        if (token.type === TokenType.LEFT_BRACE) {
-          braceDepth++;
-        } else if (token.type === TokenType.RIGHT_BRACE) {
-          braceDepth--;
-          if (braceDepth === 0) {
-            tokens.pop(); // Remove the closing }
-            break;
-          }
-        }
+      const token = this.scanToken(startInterpolation);
+      if (!token) continue;
+
+      if (token.lexeme === '{') {
+        braceDepth++;
+      } else if (token.lexeme === '}') {
+        braceDepth--;
+        if (braceDepth === 0) break;
       }
+
+      tokens.push(token);
     }
-    
+    console.log('Scanned interpolation tokens:', tokens);
     return tokens;
   }
 
@@ -547,16 +547,16 @@ export class DartLexer {
     return this.makeToken(TokenType.NUMBER, this.source.substring(this.start, this.current));
   }
 
-  private identifier(): Token {
+  private identifier(startIdentifier?: number): Token {
     // Scan identifier characters
     while (this.isAlphaNumeric(this.peek()) || this.peek() === '_' || this.peek() === '$') {
       this.advance();
     }
     
-    const text = this.source.substring(this.start, this.current);
+    const text = this.source.substring(startIdentifier || this.start, this.current);
     const type = this.keywordType(text);
     
-    return this.makeToken(type, text);
+    return this.makeToken(type, text, startIdentifier || this.start);
   }
 
   private keywordType(text: string): TokenType {
@@ -696,14 +696,14 @@ export class DartLexer {
     return c === ' ' || c === '\r' || c === '\t';
   }
 
-  private makeToken(type: TokenType, lexeme: string): Token {
+  private makeToken(type: TokenType, lexeme: string, startPosition: number = this.start): Token {
     return {
       type,
       lexeme,
-      start: this.start,
+      start: startPosition,
       end: this.current,
       line: this.line,
-      column: this.column - (this.current - this.start),
+      column: this.column - (this.current - startPosition),
     };
   }
 

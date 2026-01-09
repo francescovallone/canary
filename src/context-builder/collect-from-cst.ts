@@ -7,55 +7,9 @@ import { Token } from './lexer'
 import { Node, NodeKind, ParameterKind } from './node'
 import { Scope, ScopeKind } from './scope'
 import { SymbolEntry, SymbolKind } from './symbol-entry'
-import type { DartParser } from './parser'
 import type { CustomFunction, CustomType, Parameter as CustomParameter, Constructor } from '../define-types'
 import coreTypes from './core-types'
-
-// Import CST namespace from parser (we need to access it properly)
-type CST = ReturnType<DartParser['parse']>
-
-// Helper to get type string from TypeAnnotation
-function typeAnnotationToString(type: any): string {
-  if (!type) return ''
-  if (type.kind === 'TypeAnnotation') {
-    let result = typeNameToString(type.typeName)
-    if (type.typeArguments) {
-      const args = type.typeArguments.types.map((t: any) => typeAnnotationToString(t)).join(', ')
-      result += `<${args}>`
-    }
-    if (type.isNullable) {
-      result += '?'
-    }
-    return result
-  }
-  return ''
-}
-
-function typeNameToString(typeName: any): string {
-  if (!typeName) return ''
-  if (typeName.kind === 'FunctionTypeName') {
-    // Function type like: String Function(int, String)
-    const returnType = typeAnnotationToString(typeName.returnType)
-    const params = typeName.parameters?.parameters?.map((p: any) => {
-      const pType = typeAnnotationToString(p.type)
-      return p.name ? `${pType} ${p.name.lexeme}` : pType
-    }).join(', ') ?? ''
-    return `${returnType} Function(${params})`
-  }
-  if (typeName.kind === 'RecordTypeName') {
-    const positional = (typeName.positionalFields ?? []).map((t: any) => typeAnnotationToString(t))
-    const named = (typeName.namedFields ?? []).map((field: any) => `${typeAnnotationToString(field.type)} ${field.name.lexeme}`)
-    const segments = [...positional]
-    if (named.length) {
-      segments.push(`{${named.join(', ')}}`)
-    }
-    return `(${segments.join(', ')})`
-  }
-  if (typeName.parts && typeName.parts.length > 0) {
-    return typeName.parts.map((p: Token) => p.lexeme).join('.')
-  }
-  return ''
-}
+import { CST } from './parser'
 
 // --- Custom types injection -------------------------------------------------
 
@@ -85,6 +39,7 @@ function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): 
     extendsTypes: type.extends ? [type.extends] : [],
     typeParameters: type.typeParameters ?? [],
     documentation: type.description,
+    package: type.package,
   }
 
   nodes.push(classNode)
@@ -127,6 +82,8 @@ function registerCustomConstructor(
     type: className,
     parentClass: className,
     documentation: ctor.description,
+    typeParameters: ctor.typeParameters ?? [],
+    typeArguments: ctor.typeArguments ?? [],
   }
 
   nodes.push(ctorNode)
@@ -248,7 +205,7 @@ export interface CollectResult {
 }
 
 export function collectFromCST(
-  cst: CST,
+  cst: CST.CompilationUnit,
   customTypes?: Array<CustomType | CustomFunction>
 ): CollectResult {
   const fileScope = new Scope(ScopeKind.File)
@@ -320,9 +277,9 @@ function collectClass(decl: any, parentScope: Scope, nodes: Node[]): void {
   const className = decl.name.lexeme
 
   // Extract extends, implements, with clauses
-  const extendsTypes = decl.extendsClause ? [typeAnnotationToString(decl.extendsClause)] : []
-  const implementsTypes = decl.implementsClause?.map((t: any) => typeAnnotationToString(t)) ?? []
-  const mixins = decl.withClause?.map((t: any) => typeAnnotationToString(t)) ?? []
+  const extendsTypes = decl.extendsClause ? [CST.typeAnnotationToString(decl.extendsClause)] : []
+  const implementsTypes = decl.implementsClause?.map((t: any) => CST.typeAnnotationToString(t)) ?? []
+  const mixins = decl.withClause?.map((t: any) => CST.typeAnnotationToString(t)) ?? []
   
   // Extract type parameters
   const typeParameters = decl.typeParameters?.typeParameters?.map((tp: any) => tp.name.lexeme) ?? []
@@ -361,7 +318,8 @@ function collectFunction(
   currentClass: string | null
 ): void {
   const funcName = decl.name.lexeme
-  const returnType = typeAnnotationToString(decl.returnType)
+  console.log('Collecting function:', decl.returnType)
+  const returnType = CST.typeAnnotationToString(decl.returnType)
   
   // Check if this is a constructor (name matches class name)
   const isConstructor = currentClass !== null && 
@@ -404,7 +362,7 @@ function collectFunction(
       collectParameter(param, funcScope, nodes, currentClass)
     }
   }
-
+  console.log('Function parameters collected for:', funcName, decl.body)
   // Collect body statements
   if (decl.body?.kind === 'BlockFunctionBody' && decl.body.statements) {
     for (const stmt of decl.body.statements) {
@@ -420,7 +378,7 @@ function collectParameter(
   currentClass: string | null
 ): void {
   const paramName = param.name.lexeme
-  let paramType = typeAnnotationToString(param.type)
+  let paramType = CST.typeAnnotationToString(param.type)
   let defaultValue: string | undefined = undefined
   let paramClassName = currentClass
 
@@ -508,7 +466,7 @@ function collectVariable(
   currentClass: string | null
 ): void {
   const varName = decl.name.lexeme
-  let varType: string | undefined = typeAnnotationToString(decl.type) || undefined
+  let varType: string | undefined = CST.typeAnnotationToString(decl.type) || undefined
   
   const nodeKind = currentClass ? NodeKind.Field : NodeKind.Variable
   const symbolKind = currentClass ? SymbolKind.Field : SymbolKind.Variable
@@ -551,7 +509,7 @@ function collectGetter(
   currentClass: string | null
 ): void {
   const getterName = decl.name.lexeme
-  const returnType = typeAnnotationToString(decl.returnType)
+  const returnType = CST.typeAnnotationToString(decl.returnType)
 
   const node: Node = {
     kind: NodeKind.Accessor,
@@ -614,14 +572,14 @@ function collectTypedef(decl: any, parentScope: Scope, nodes: Node[]): void {
   
   if (decl.aliasedType) {
     // New-style typedef: typedef MyFunc = void Function(int);
-    aliasedType = typeAnnotationToString(decl.aliasedType)
+    aliasedType = CST.typeAnnotationToString(decl.aliasedType)
   } else if (decl.returnType && decl.parameters) {
     // Old-style typedef: typedef void MyFunc(int x);
-    const returnType = typeAnnotationToString(decl.returnType) || 'void'
+    const returnType = CST.typeAnnotationToString(decl.returnType) || 'void'
     const params: string[] = []
     if (decl.parameters?.parameters) {
       for (const param of decl.parameters.parameters) {
-        const paramType = typeAnnotationToString(param.type) || 'dynamic'
+        const paramType = CST.typeAnnotationToString(param.type) || 'dynamic'
         const paramName = param.name?.lexeme
         if (paramName) {
           params.push(`${paramType} ${paramName}`)
@@ -701,8 +659,8 @@ function collectMixin(decl: any, parentScope: Scope, nodes: Node[]): void {
   const mixinScope = new Scope(ScopeKind.Class, parentScope)
   const mixinName = decl.name.lexeme
 
-  const onClause = decl.onClause?.map((t: any) => typeAnnotationToString(t)) ?? []
-  const implementsTypes = decl.implementsClause?.map((t: any) => typeAnnotationToString(t)) ?? []
+  const onClause = decl.onClause?.map((t: any) => CST.typeAnnotationToString(t)) ?? []
+  const implementsTypes = decl.implementsClause?.map((t: any) => CST.typeAnnotationToString(t)) ?? []
   const typeParameters = decl.typeParameters?.typeParameters?.map((tp: any) => tp.name.lexeme) ?? []
 
   const node: Node = {
@@ -734,7 +692,7 @@ function collectMixin(decl: any, parentScope: Scope, nodes: Node[]): void {
 function collectExtension(decl: any, parentScope: Scope, nodes: Node[]): void {
   const extScope = new Scope(ScopeKind.Class, parentScope)
   const extName = decl.name?.lexeme ?? ''
-  const extendedType = typeAnnotationToString(decl.extendedType)
+  const extendedType = CST.typeAnnotationToString(decl.extendedType)
 
   const node: Node = {
     kind: NodeKind.Class,
@@ -772,7 +730,6 @@ function collectStatement(
       collectVariableStatement(stmt, scope, nodes, currentClass)
       break
     case 'ExpressionStatement':
-      console.log('ExpressionStatement encountered in collectStatement', stmt.expression.target)
       // Could analyze for assignments, etc.
       break
     case 'IfStatement':
@@ -790,7 +747,9 @@ function collectStatement(
       break
     // Block-like statements that contain more statements
     default:
+      console.log('Collecting statements of kind:', stmt.kind)
       if (stmt.statements) {
+        console.log('Collecting block statements:', stmt.statements.length)
         for (const s of stmt.statements) {
           collectStatement(s, scope, nodes, currentClass)
         }
@@ -805,7 +764,7 @@ function collectVariableStatement(
   currentClass: string | null
 ): void {
   const varName = stmt.name.lexeme
-  let varType: string | undefined = typeAnnotationToString(stmt.type) || undefined
+  let varType: string | undefined = CST.typeAnnotationToString(stmt.type) || undefined
   // If no explicit type, try to infer from initializer
   if (!varType && stmt.initializer) {
     varType = inferTypeFromExpression(stmt.initializer, scope)
@@ -857,7 +816,7 @@ function extractExpressionText(expr: any): string | undefined {
  */
 function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
   if (!expr) return undefined
-
+  console.log('Inferring type from expression kind:', expr.kind)
   switch (expr.kind) {
     case 'FunctionCall': {
       // FunctionCall with Identifier target could be a constructor call or function call
@@ -878,12 +837,23 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
       // Prefer explicit type args if present
       const typeArg = expr.typeArguments?.types?.[0]
       if (typeArg) {
-        const inner = typeAnnotationToString(typeArg)
+        const inner = CST.typeAnnotationToString(typeArg)
         return inner ? `List<${inner}>` : 'List<dynamic>'
       }
       const first = (expr.elements || [])[0]
       if (first) {
-        const elemType = inferTypeFromExpression(first, scope) || 'dynamic'
+        let elemType = 'dynamic'
+        if (first.kind === 'ExpressionElement') {
+          const inferred = inferTypeFromExpression(first.expression, scope)
+          if (inferred) {
+            elemType = inferred
+          }
+        } else {
+          const inferred = inferTypeFromExpression(first, scope)
+          if (inferred) {
+            elemType = inferred
+          }
+        }
         return `List<${elemType}>`
       }
       return 'List<dynamic>'
@@ -891,9 +861,12 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
     case 'RecordLiteral': {
       return inferRecordTypeFromLiteral(expr, scope)
     }
+    case 'RecordTypeLiteral': {
+      console.log('RecordTypeLiteral inference not implemented yet')
+      return inferRecordTypeFromLiteral(expr, scope)
+    }
     case 'Identifier': {
       const sym = scope.resolve(expr.name.lexeme)
-      console.log('Identifier symbol:', sym)
       return sym?.node.type
     }
     case 'PropertyAccess': {
@@ -928,7 +901,7 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
       const params: string[] = []
       if (expr.parameters?.parameters) {
         for (const param of expr.parameters.parameters) {
-          const paramType = typeAnnotationToString(param.type) || 'dynamic'
+          const paramType = CST.typeAnnotationToString(param.type) || 'dynamic'
           const paramName = param.name?.lexeme
           params.push(paramType)
           
@@ -982,14 +955,41 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
 }
 
 function inferRecordTypeFromLiteral(expr: any, scope: Scope): string | undefined {
+  const recordScope = new Scope(ScopeKind.RecordTypeLiteral, scope)
   const positionalTypes: string[] = []
   for (const value of expr.positionalFields || []) {
-    positionalTypes.push(inferTypeFromExpression(value, scope) || 'dynamic')
+    const valueType = inferTypeFromExpression(value, scope) || 'dynamic'
+    const i = positionalTypes.length
+    recordScope.define({
+      name: `$${i + 1}`,
+      kind: SymbolKind.Accessor,
+      node: {
+        kind: NodeKind.Accessor,
+        name: `$${i + 1}`,
+        start: -1,
+        end: -1,
+        scope: recordScope,
+        type: valueType,
+      },
+    })
+    positionalTypes.push(valueType)
   }
 
   const namedTypes: string[] = []
   for (const field of expr.namedFields || []) {
     const valueType = inferTypeFromExpression(field.value, scope) || 'dynamic'
+    recordScope.define({
+      name: field.name.lexeme,
+      kind: SymbolKind.Accessor,
+      node: {
+        kind: NodeKind.Accessor,
+        name: field.name.lexeme,
+        start: field.name.start,
+        end: field.name.end,
+        scope: recordScope,
+        type: valueType,
+      },
+    })
     namedTypes.push(`${valueType} ${field.name.lexeme}`)
   }
 
@@ -1000,7 +1000,19 @@ function inferRecordTypeFromLiteral(expr: any, scope: Scope): string | undefined
   if (namedTypes.length) {
     parts.push(`{${namedTypes.join(', ')}}`)
   }
-
+  const node = {
+    kind: NodeKind.RecordTypeLiteral,
+    name: `(${parts.join(', ')})`,
+    start: -1,
+    end: -1,
+    scope: recordScope,
+    type: `(${parts.join(', ')})`,
+  }
+  scope.define({
+    name: node.name,
+    kind: SymbolKind.TypeLiteral,
+    node,
+  })
   return `(${parts.join(', ')})`
 }
 

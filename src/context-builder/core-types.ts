@@ -17,14 +17,15 @@ export const listType = defineType({
 			description: 'Whether the list is not empty.'
 		},
 		map: {
-			type: 'Function',
-			description: 'Returns a new list with the results of applying the given function to each element.',
+			type: 'Iterable<T>',
+			description: 'Returns a new lazy Iterable with the results of applying the given function to each element.',
 			typeParameters: ['T'],
+			returnType: 'Iterable<T>',
 			parameters: [
 				{
 					name: 'toElement',
 					kind: 'positional',
-					type: 'List<T> Function(T toElement(E e)) toElement',
+					type: 'T Function(E)',
 					description: 'The function to apply to each element.',
 				}
 			]

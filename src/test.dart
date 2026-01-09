@@ -15,60 +15,71 @@ final details = [
   ),
 ];
 
-typedef StringCallback<T> = String Function(T name);
-typedef void VoidCallback();
-typedef IntMapper<T> = T Function(int value);
+class ShadAccordion<T> {
+  final Iterable<ShadAccordionItem<T>> children;
 
-class Animal<T> {
-  final String species;
+  ShadAccordion({required this.children});
+}
 
-  const Animal({this.species = 'Unknown'});
+class ShadAccordionItem<T> {
+  final T value;
+  final dynamic title;
+  final dynamic child;
 
-  T makeSound(T value) {
-    print("Some generic animal sound");
-    return value;
+  ShadAccordionItem({
+    required this.value,
+    required this.title,
+    required this.child,
+  });
+}
+
+class Node<T> { T? next; }
+
+class Text {
+  final String data;
+
+  Text(this.data);
+}
+
+class BuildContext {}
+
+class Widget {}
+
+class Tree<T> {
+  T value;
+  List<Tree<T>> children;
+
+  Tree({required this.value, this.children = const []});
+}
+
+void main() {
+  final data = [1, 2, 3];
+  num toNum(int x) => x;
+  String twoArgs(String a, String b) => a + b;
+  T identity<T>(T x) => x;
+
+data.map(toNum); // What is R here?
+  final newData = [];
+  final result = data.map((e) {
+    print(e);
+  });
+  data.map((e) {
+  if (condition) return 1;
+  else return null;
+});
+  data.map((e) => throw Exception());
+  data.map((e) {
+  if (condition) return 1;
+  else throw Exception();
+}); // R = int?
+}
+
+extension IterableExtensions<E> on Iterable<E> {
+  R foo<R>(R Function(E) f, R defaultValue) {
+    return this.map(f).firstWhere((_) => true, orElse: () => defaultValue);
   }
 }
 
-/// A Dog class that extends Animal
-class Dog extends Animal {
-  StringCallback<String> name;
-
-  Dog(this.name, {super.species});
-
-}
-
-
-// Top-level functions
 String bark(String sound) {
-  return "Woof! Woof! $sound";
-}
-
-double doubleValue(int x) {
-  return x * 2;
-}
-
-
-void main() {
-  final myDog = Dog(
-    (String name) {
-      return name;
-    }, 
-    species: 'Canine'
-  );
-  (data) {
-    print(data);
-  };
-  final result = myDog.name;
-  print('Dog name: $result');
-  myDog.makeSound('Woof! Woof!');
-  
-  // Using top-level functions
-  final barkSound = bark('Hello');
-  final doubled = doubleValue(21);
-  final v = List.generate();
-  
-details.map((detail) {
-  print('${detail.title}\n${detail.content}\n');
-});
+  return "Woof! Woof! ${sound}";
 }

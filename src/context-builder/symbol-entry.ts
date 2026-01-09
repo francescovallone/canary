@@ -19,4 +19,5 @@ export enum SymbolKind {
   Accessor = 'accessor',
   TemplateString = 'template_string',
   Typedef = 'typedef',
+  TypeLiteral = 'type_literal',
 }

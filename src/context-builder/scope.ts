@@ -7,8 +7,8 @@ export enum ScopeKind {
   Constructor,
   Function,
   Block,
+  RecordTypeLiteral,
 }
-
 
 export class Scope {
   readonly kind: ScopeKind

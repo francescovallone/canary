@@ -24,7 +24,7 @@ features:
 ---
 
 
-```dart
+```dart canary
 const dartExample = '';
 
 // Custom type definitions
@@ -68,6 +68,7 @@ class Owner {
 
 
 void main() {
+  final animal = Animal<String>(species: Owner('Generic Species'));
   final myDog = Dog(
     (String name) {
       return name;
@@ -88,6 +89,13 @@ void main() {
 ```
 
 ```dart canary
+// Top-level functions
+String bark(String sound) {
+  return "Woof! Woof! ${sound}";
+}
+```
+
+```dart
 final details = [
   (
     title: 'Is it acceptable?',
