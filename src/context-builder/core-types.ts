@@ -31,10 +31,33 @@ export const listType = defineType({
 			]
 		}
 	},
+	modifiers: ['abstract', 'interface'],
 	typeParameters: ['E'],
 	package: 'dart:core',
 })
+const stringType = defineType({
+	name: 'String',
+	description: 'A sequence of UTF-16 code units.',
+	members: {
+		length: {
+			type: 'int',
+			description: 'The number of code units in the string.'
+		},
+		isEmpty: {
+			type: 'bool',
+			description: 'Whether the string is empty.'
+		},
+		isNotEmpty: {
+			type: 'bool',
+			description: 'Whether the string is not empty.'
+		}
+	},
+	package: 'dart:core',
+	modifiers: ['abstract', 'final'],
+	implementsTypes: ['Comparable<String>', 'Pattern']
+})
 
 export default [
-	listType
+	listType,
+	stringType
 ]

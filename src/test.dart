@@ -23,8 +23,8 @@ class ShadAccordion<T> {
 
 class ShadAccordionItem<T> {
   final T value;
-  final dynamic title;
-  final dynamic child;
+  final Widget title;
+  final Widget child;
 
   ShadAccordionItem({
     required this.value,
@@ -35,7 +35,7 @@ class ShadAccordionItem<T> {
 
 class Node<T> { T? next; }
 
-class Text {
+class Text extends Widget {
   final String data;
 
   Text(this.data);
@@ -54,6 +54,11 @@ class Tree<T> {
 
 void main() {
   final data = [1, 2, 3];
+  ShadAccordionItem(
+    child: Text('Hello'),
+    title: Text('Title'),
+    value: 1,
+  );
   num toNum(int x) => x;
   String twoArgs(String a, String b) => a + b;
   T identity<T>(T x) => x;

@@ -55,7 +55,6 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       
       // Collect symbols from CST and build scope tree (inject custom types if provided)
       const { fileScope } = collectFromCST(cst, customTypes?.types)
-      console.log('Collected symbols:', fileScope.symbols)
       // Generate hovers directly from CST (no shallow token-based resolution)
       const hovers = generateHoversFromCST(cst, fileScope)
       ;(this.meta as CanaryMeta).canary = { hovers }

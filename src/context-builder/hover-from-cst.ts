@@ -1013,14 +1013,17 @@ function collectHoversFromFunctionCall(
   // Check if this is a constructor call (target is Identifier that refers to a class)
   if (expr.target?.kind === 'Identifier') {
     const name = expr.target.name.lexeme
+    console.log('Function call found:', name)
     const sym = ctx.fileScope.resolve(name)
     if (sym?.kind === SymbolKind.Class) {
       // This is a constructor call - find the constructor and show its signature
       const constructorSym = sym.node.scope?.resolve(sym.name)
+      console.log('Constructor symbol for hover:', constructorSym)
       if (constructorSym?.kind === SymbolKind.Constructor) {
         // Pass explicit type arguments from the constructor call (e.g., List<RecordType>)
         const explicitTypeArgs = expr.target.typeArguments
         console.log('Constructor symbol found for hover:', explicitTypeArgs)
+        console.log('Constructor symbol for expression:', expr)
         const formattedSig = formatSymbolWithGenericSubstitution(constructorSym, expr.arguments, scope, ctx, explicitTypeArgs)
         console.log('Constructor hover:', formattedSig)
         hovers.push({
@@ -1381,6 +1384,7 @@ function formatSymbolWithGenericSubstitution(
   ctx: HoverContext,
   explicitTypeArgs?: any
 ): string {
+  console.log('Formatting symbol with generic substitution:', sym.name)
   // If no type parameters, just use the regular format
   if (!sym.node.typeParameters || sym.node.typeParameters.length === 0) {
     return formatSymbol(sym)
@@ -1410,6 +1414,7 @@ function formatSymbolWithGenericSubstitution(
   let argIndex = 0
   
   for (const arg of args) {
+    // TODO: CHECK NAMED ARGUMENTS AS WELL
     console.log('Processing argument:', arg)
     if (arg.kind === 'PositionalArgument' && argIndex < positionalParams.length) {
       const param = positionalParams[argIndex]
@@ -1441,7 +1446,7 @@ function formatSymbolWithGenericSubstitution(
       }
     }
   }
-  
+  console.log('Inferred type map for substitution:', typeMap, typeParams)
   // If we didn't infer any types, just use the regular format
   if (typeMap.size === 0) {
     return formatSymbol(sym)
@@ -1511,6 +1516,10 @@ function formatSymbolWithSubstitution(sym: SymbolEntry, typeMap: Map<string, str
   }
 
   // For methods, return without the type parameters since they're now concrete
+  if (sym.kind === SymbolKind.Constructor) {
+    console.log('Formatting constructor with substitution:', sym.name)
+    return `${type}<${Array.from(typeMap.values()).join(', ')}>(${parameterBlock})`
+  }
   if (sym.kind === SymbolKind.Method || sym.kind === SymbolKind.Function) {
     return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}(${parameterBlock})`
   }
@@ -1702,7 +1711,14 @@ function resolveTypeAlias(typeName: string | undefined, scope: Scope | undefined
 function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
   const resolutionScope = scope ?? sym.node.scope?.parent
   let type = resolveTypeAlias(sym.node.type, resolutionScope)
-  
+  console.log('Resolved type for symbol', sym.name, ':', type)
+  console.log('Resolution scope:', sym.node)
+  const hasTypeParams = sym.node.typeParameters && sym.node.typeParameters.length > 0
+  if (hasTypeParams) {
+    const generics = renderTypeParams(sym.node.typeParameters)
+    type += generics
+  }
+  console.log('Final type for symbol', sym.name, ':', type)
   const parameters = sym.node.scope 
     ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter) 
     : []
@@ -1768,7 +1784,8 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
       if ((sym.node.mixins?.length ?? 0) > 0) {
         additionalParts.push(`with ${sym.node.mixins?.join(', ')}`)
       }
-      return `\`class ${sym.name}${generics}${additionalParts.length > 0 ? ' ' + additionalParts.join(' ') : ''}\``
+      const modifiers = (sym.node.modifiers?.length ?? 0) > 0 ? sym.node.modifiers?.join(' ') + ' ' : ''
+      return `\`${modifiers}class ${sym.name}${generics}${additionalParts.length > 0 ? ' ' + additionalParts.join(' ') : ''}\``
     
     case SymbolKind.Variable:
     case SymbolKind.Field:
@@ -1785,7 +1802,6 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
     
     case SymbolKind.Function:
     case SymbolKind.Method:
-      console.log('Formatting method/function symbol:', sym.node.scope.symbols)
       return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
     
     case SymbolKind.Constructor:

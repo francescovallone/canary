@@ -1,3 +1,5 @@
+export type Modifiers = 'abstract' | 'final' | 'sealed' | 'base' | 'interface' | 'mixin' | 'static'
+
 export interface CustomType {
   name: string
   description?: string
@@ -8,6 +10,8 @@ export interface CustomType {
   constructors?: Constructor[]
   kind?: 'class'
   package?: string
+  modifiers?: Modifiers[],
+  implementsTypes?: string[]
 }
 
 export interface CustomFunction {

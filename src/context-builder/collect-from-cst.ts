@@ -40,6 +40,8 @@ function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): 
     typeParameters: type.typeParameters ?? [],
     documentation: type.description,
     package: type.package,
+    modifiers: type.modifiers,
+    implementsTypes: type.implementsTypes ?? [],
   }
 
   nodes.push(classNode)
@@ -53,14 +55,14 @@ function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): 
   // Instance members
   if (type.members) {
     for (const [name, member] of Object.entries(type.members)) {
-      registerCustomMember(name, member, classScope, nodes, type.name, /*isStatic*/ false)
+      registerCustomMember(name, member, classScope, nodes, type.name, false)
     }
   }
 
   // Static members
   if (type.staticMembers) {
     for (const [name, member] of Object.entries(type.staticMembers)) {
-      registerCustomMember(name, member, classScope, nodes, type.name, /*isStatic*/ true)
+      registerCustomMember(name, member, classScope, nodes, type.name, true)
     }
   }
 }

@@ -24,7 +24,7 @@ features:
 ---
 
 
-```dart canary
+```dart
 const dartExample = '';
 
 // Custom type definitions
@@ -88,14 +88,14 @@ void main() {
 }
 ```
 
-```dart canary
+```dart
 // Top-level functions
-String bark(String sound) {
-  return "Woof! Woof! ${sound}";
+int bark(String sound) {
+  return sound.length;
 }
 ```
 
-```dart
+```dart canary
 final details = [
   (
     title: 'Is it acceptable?',

@@ -821,7 +821,6 @@ export namespace CST {
       return `(${segments.join(', ')})`
     }
     if (typeName.parts && typeName.parts.length > 0) {
-      console.log('Type name parts:', typeName.parts.map((p: Token) => p))
       return typeName.parts.map((p: Token) => p.lexeme).join('.')
     }
     return ''
@@ -874,7 +873,6 @@ export class DartParser {
           this.advance();
         }
       } catch (e) {
-        console.log('Parse error:', e);
         // Error recovery: synchronize and continue
         this.synchronize();
       }
@@ -990,10 +988,8 @@ export class DartParser {
         range: [metadata[0]?.range[0] ?? modifiers[0]?.start ?? returnType?.range[0] ?? name.start, body.range[1]],
       };
     }
-    console.log('Parsing function or variable with return type:', returnType, this.peek(), this.peekNext(), this.peekPrevious(), this.tokens[this.current-4]);
     // Must be function or variable
     const name = this.consume(TokenType.IDENTIFIER, "Expected name");
-    console.log(name);
     // Skip whitespace before checking for type params or parens
     this.skipTrivia();
 
@@ -1053,7 +1049,6 @@ export class DartParser {
     if (this.match(TokenType.EQUALS)) {
       initializer = this.parseExpression();
     }
-    console.log(' Parsed variable initializer:', initializer);
     this.consume(TokenType.SEMICOLON, "Expected ';' after variable declaration");
 
     this.context = savedContext;
@@ -1074,7 +1069,6 @@ export class DartParser {
 
     // Parse base type name
     const typeName = this.parseTypeName();
-    console.log('Parsed type name:', typeName);
 
     // Type arguments: <T, U>
     let typeArguments: CST.TypeArgumentList | null = null;
@@ -1577,9 +1571,7 @@ export class DartParser {
 
   // Pratt parser / precedence climbing for expressions
   private parseExpression(minPrecedence: number = 0): CST.Expression {
-    console.log('parseExpression at token:', this.peek());
     let left = this.parsePrimaryExpression();
-    console.log('Parsed primary expression:', left);
     while (true) {
       const operator = this.peek();
       const precedence = this.getPrecedence(operator.type);
@@ -1678,7 +1670,6 @@ export class DartParser {
   }
 
   private parsePrimaryExpression(): CST.Expression {
-    console.log('parsePrimaryExpression at token:', this.peek());
     // Prefix operators: !, -, ~, ++, --, await
     if (this.isUnaryOperator(this.peek().type)) {
       const operator = this.advance();
@@ -1744,15 +1735,12 @@ export class DartParser {
     // Function expression: () => expr or () { }
     // Must check BEFORE parenthesized/record expressions since both start with (
     if (this.check(TokenType.LEFT_PAREN)) {
-      console.log('Checking for function expression or record literal at token:', this.peek());
       // Could be function expression or just grouped/record expression
       // Need lookahead to decide
       if (this.looksLikeFunctionExpression()) {
         return this.parseFunctionExpression();
       }
-      console.log('Not a function expression, checking for record literal at token:', this.peek());
       if (this.looksLikeRecordLiteralOrRecordType()) {
-        console.log('Parsing record literal at token:', this.peek());
         return this.parseRecordLiteralOrRecordType();
       }
       // Not a function expression or record, parse as grouped expression
@@ -1856,11 +1844,9 @@ export class DartParser {
             range: [name.start, value.range[1]],
           });
         } else {
-          console.log(this.peek());
           let value: any;
           if (this.check(TokenType.LEFT_BRACE)) {
             value = this.parseRecordType();
-            console.log('Parsed record type as value in record literal:', value);
           } else {
             value = this.parseExpression();
           }
@@ -1878,7 +1864,6 @@ export class DartParser {
     }
 
     const end = this.consume(TokenType.RIGHT_PAREN, "Expected ')' after record literal");
-    console.log('Parsed record literal with', positionalFields.length, 'positional and', namedFields.length, 'named fields');
     return {
       kind: 'RecordLiteral',
       positionalFields,
@@ -2063,7 +2048,6 @@ export class DartParser {
     
     let maxIterations = 1000;
     while (!this.isAtEnd() && maxIterations-- > 0) {
-      console.log('Synchronizing at token:', this.peek());
       // Semicolon is a natural statement boundary
       if (this.previous().type === TokenType.SEMICOLON) {
         return;
@@ -2551,7 +2535,6 @@ export class DartParser {
   private parseBlock(): CST.BlockFunctionBody {
     const start = this.consume(TokenType.LEFT_BRACE, "Expected '{'");
     const statements: CST.Statement[] = [];
-    console.log('Parsing block starting at token:', this.peek());
     while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
       statements.push(this.parseStatement());
     }
