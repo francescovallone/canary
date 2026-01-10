@@ -59,6 +59,12 @@ export function setupCanaryTheme(ctx: EnhanceAppContext) {
 		} else {
 			docsContainer.style.display = 'none'
 		}
+		console.log(popover.getClientRects(), textContainer.getClientRects())
+		if (textContainer.clientWidth >= 600) {
+			console.log('Setting wide hover')
+			popover.style.maxWidth = '900px'
+			textContainer.style.maxWidth = '900px'
+		}
 		popover.style.display = 'block'
 		popover.dataset.visible = 'true'
     	popover.dataset.fromClick = fromClick ? 'true' : 'false'

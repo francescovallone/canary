@@ -119,6 +119,7 @@ Widget build(BuildContext context) {
     children: details.map(
       (detail) => ShadAccordionItem(
         value: detail,
+        headerValue: detail.title,
         title: Text(detail.title),
         child: Text(detail.content),
       ),

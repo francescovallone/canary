@@ -53,30 +53,28 @@ class Tree<T> {
 }
 
 void main() {
-  final data = [1, 2, 3];
-  ShadAccordionItem(
-    child: Text('Hello'),
-    title: Text('Title'),
-    value: 1,
+  ShadAccordion
+<({String content, String title})>(
+    children: details
+.map
+(
+      (
+detail
+) => ShadAccordionItem
+(
+        value: detail
+,
+        title: Text
+(detail
+.title
+),
+        child: Text
+(detail
+.content
+),
+      ),
+    ),
   );
-  num toNum(int x) => x;
-  String twoArgs(String a, String b) => a + b;
-  T identity<T>(T x) => x;
-
-data.map(toNum); // What is R here?
-  final newData = [];
-  final result = data.map((e) {
-    print(e);
-  });
-  data.map((e) {
-  if (condition) return 1;
-  else return null;
-});
-  data.map((e) => throw Exception());
-  data.map((e) {
-  if (condition) return 1;
-  else throw Exception();
-}); // R = int?
 }
 
 extension IterableExtensions<E> on Iterable<E> {

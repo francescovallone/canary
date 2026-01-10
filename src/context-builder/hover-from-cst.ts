@@ -611,7 +611,6 @@ function collectHoversFromTypeName(
   if (typeName.kind === 'RecordTypeName') {
     // Hover for the whole record type
     const display = CST.typeNameToString(typeName)
-    console.log('Record type hover:', display)
     hovers.push({
       range: { start: typeName.range[0], end: typeName.range[1] },
       markdown: display,
@@ -842,7 +841,6 @@ function collectHoversFromExpression(
       break
     }
     case 'StringLiteral':
-      console.log('String literal found:', expr)
       if (expr.value.interpolations) {
         for (const interp of expr.value.interpolations) {
           collectHoversFromInterpolations(interp, scope, hovers, ctx)
@@ -937,7 +935,6 @@ function collectHoversFromMethodCall(
 
   // Collect hovers from method name
   const methodName = expr.methodName?.lexeme
-  console.log('Method call found:', methodName)
   if (!methodName) return
   
   const targetType = inferExpressionType(expr.target, scope, ctx)
@@ -1013,19 +1010,14 @@ function collectHoversFromFunctionCall(
   // Check if this is a constructor call (target is Identifier that refers to a class)
   if (expr.target?.kind === 'Identifier') {
     const name = expr.target.name.lexeme
-    console.log('Function call found:', name)
     const sym = ctx.fileScope.resolve(name)
     if (sym?.kind === SymbolKind.Class) {
       // This is a constructor call - find the constructor and show its signature
       const constructorSym = sym.node.scope?.resolve(sym.name)
-      console.log('Constructor symbol for hover:', constructorSym)
       if (constructorSym?.kind === SymbolKind.Constructor) {
         // Pass explicit type arguments from the constructor call (e.g., List<RecordType>)
         const explicitTypeArgs = expr.target.typeArguments
-        console.log('Constructor symbol found for hover:', explicitTypeArgs)
-        console.log('Constructor symbol for expression:', expr)
         const formattedSig = formatSymbolWithGenericSubstitution(constructorSym, expr.arguments, scope, ctx, explicitTypeArgs)
-        console.log('Constructor hover:', formattedSig)
         hovers.push({
           range: { start: expr.target.name.start, end: expr.target.name.end },
           markdown: formattedSig,
@@ -1034,7 +1026,6 @@ function collectHoversFromFunctionCall(
         })
       } else {
         // Fallback to just showing class
-        console.log('Class hover (no constructor):', formatSymbol(sym))
         hovers.push({
           range: { start: expr.target.name.start, end: expr.target.name.end },
           markdown: formatSymbol(sym),
@@ -1384,14 +1375,13 @@ function formatSymbolWithGenericSubstitution(
   ctx: HoverContext,
   explicitTypeArgs?: any
 ): string {
-  console.log('Formatting symbol with generic substitution:', sym.name)
   // If no type parameters, just use the regular format
   if (!sym.node.typeParameters || sym.node.typeParameters.length === 0) {
     return formatSymbol(sym)
   }
   
   // Build a map of type parameter to inferred type
-  const typeMap = new Map<string, string>()
+  const typeMap = new Map<string, {type: string, inferred: boolean}>()
   const typeParams = sym.node.typeParameters
   
   // First, use explicit type arguments if provided (e.g., ShadAccordionItem<RecordType>)
@@ -1399,7 +1389,7 @@ function formatSymbolWithGenericSubstitution(
     for (let i = 0; i < Math.min(explicitTypeArgs.types.length, typeParams.length); i++) {
       const explicitType = CST.typeAnnotationToString(explicitTypeArgs.types[i])
       if (explicitType) {
-        typeMap.set(typeParams[i], explicitType)
+        typeMap.set(typeParams[i], {type: explicitType, inferred: false})
       }
     }
   }
@@ -1414,8 +1404,6 @@ function formatSymbolWithGenericSubstitution(
   let argIndex = 0
   
   for (const arg of args) {
-    // TODO: CHECK NAMED ARGUMENTS AS WELL
-    console.log('Processing argument:', arg)
     if (arg.kind === 'PositionalArgument' && argIndex < positionalParams.length) {
       const param = positionalParams[argIndex]
       const paramType = param.node.type
@@ -1426,7 +1414,7 @@ function formatSymbolWithGenericSubstitution(
         const argExpr = arg.expression
         const inferredType = inferExpressionType(argExpr, scope, ctx)
         if (inferredType) {
-          typeMap.set(paramType, inferredType)
+          typeMap.set(paramType, {type: inferredType, inferred: true})
         }
       }
       argIndex++
@@ -1439,21 +1427,64 @@ function formatSymbolWithGenericSubstitution(
         if (paramType && typeParams.includes(paramType)) {
           const inferredType = inferExpressionType(arg, scope, ctx)
           if (inferredType) {
-            typeMap.set(paramType, inferredType)
+            typeMap.set(paramType, {type: inferredType, inferred: true})
           }
         }
         argIndex++
       }
+    } else if (arg.kind === 'NamedArgument') {
+      const param = parameters.find(p => p.name === arg.name.lexeme && p.node.parameterKind === ParameterKind.Named)
+      const paramType = param?.node.type
+      if (paramType && typeParams.includes(paramType)) {
+        const argValue = arg.value
+        if (argValue) {
+          if (argValue.kind === 'Identifier') {
+            let argSym = undefined
+            let currentScope: Scope | null = scope
+            while (currentScope) {
+              argSym = currentScope.resolve(argValue.name.lexeme)
+              if (argSym) break
+              currentScope = currentScope.parent
+            }
+            if (argSym && argSym.node.type) {
+              if (!typeMap.has(paramType)) {
+                typeMap.set(paramType, {type: argSym.node.type, inferred: true})
+              } else {
+                if (typeMap.get(paramType)?.inferred && typeMap.get(paramType)?.type !== argSym.node.type) {
+                  typeMap.set(paramType, {type: 'dynamic', inferred: true})
+                }
+              }
+            }
+          }
+          if (argValue.kind === 'PropertyAccess') {
+            const targetType = inferExpressionType(argValue.target, scope, ctx)
+            if (targetType) {
+              const propSym = resolveTypeMember(targetType, argValue.propertyName?.lexeme, ctx)
+              if (propSym && propSym.node.type) {
+                if (!typeMap.has(paramType)) {
+                  typeMap.set(paramType, {type: propSym.node.type, inferred: true})
+                } else {
+                  if (typeMap.get(paramType)?.inferred && typeMap.get(paramType)?.type !== propSym.node.type) {
+                    typeMap.set(paramType, {type: 'dynamic', inferred: true})
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
-  console.log('Inferred type map for substitution:', typeMap, typeParams)
+  
   // If we didn't infer any types, just use the regular format
   if (typeMap.size === 0) {
     return formatSymbol(sym)
   }
   
   // Build the formatted symbol with substituted types
-  return formatSymbolWithSubstitution(sym, typeMap)
+  return formatSymbolWithSubstitution(sym, new Map(
+    Array.from(typeMap.entries()).map(([k, v]) => [k, v.type])
+  ))
 }
 
 /**
@@ -1517,7 +1548,6 @@ function formatSymbolWithSubstitution(sym: SymbolEntry, typeMap: Map<string, str
 
   // For methods, return without the type parameters since they're now concrete
   if (sym.kind === SymbolKind.Constructor) {
-    console.log('Formatting constructor with substitution:', sym.name)
     return `${type}<${Array.from(typeMap.values()).join(', ')}>(${parameterBlock})`
   }
   if (sym.kind === SymbolKind.Method || sym.kind === SymbolKind.Function) {
@@ -1711,14 +1741,11 @@ function resolveTypeAlias(typeName: string | undefined, scope: Scope | undefined
 function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
   const resolutionScope = scope ?? sym.node.scope?.parent
   let type = resolveTypeAlias(sym.node.type, resolutionScope)
-  console.log('Resolved type for symbol', sym.name, ':', type)
-  console.log('Resolution scope:', sym.node)
   const hasTypeParams = sym.node.typeParameters && sym.node.typeParameters.length > 0
   if (hasTypeParams) {
     const generics = renderTypeParams(sym.node.typeParameters)
     type += generics
   }
-  console.log('Final type for symbol', sym.name, ':', type)
   const parameters = sym.node.scope 
     ? Array.from(sym.node.scope.symbols.values()).filter(s => s.kind === SymbolKind.Parameter) 
     : []
@@ -1766,7 +1793,6 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
   if (paramLines.length > 0) {
     parameterBlock = '\n' + paramLines.join('\n') + '\n'
   }
-  console.log('Formatting symbol:', sym.name, sym.kind)
   switch (sym.kind) {
     case SymbolKind.Class:
       const additionalParts: string[] = []
@@ -1848,7 +1874,6 @@ function buildDocumentation(sym: SymbolEntry): string | undefined {
     if (sym.node.package) declared += ` in \`${sym.node.package}\``
     parts.push(declared)
   }
-  console.log(sym.node.package);
   if (sym.node.package && !sym.node.parentClass) {
     parts.push(`Declared in \`${sym.node.package}\``)
   }
@@ -1904,14 +1929,12 @@ function resolveRecordField(targetType: string, propertyName: any, scope: Scope 
       currentScope = currentScope.parent
     }
   }
-  console.log('Record symbol for type', targetType, ':', recordSym)
   if (!recordSym || recordSym.kind !== SymbolKind.TypeLiteral) {
     recordSym = ctx.fileScope.resolve(targetType)
     if (!recordSym || recordSym.kind !== SymbolKind.TypeLiteral) {
       return undefined
     }
   }
-  console.log(recordSym.node.scope.symbols)
   const propertySym = recordSym.node.scope.resolve(propertyName.lexeme)
   // Look for the field in the record's members
   if (propertySym) {

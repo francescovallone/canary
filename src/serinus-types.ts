@@ -276,6 +276,7 @@ export const serinusTypes = defineCustomTypes({
           description: 'Creates a new ShadAccordionItem instance.',
           parameters: [
             { type: 'T', name: 'value', description: 'The value of the accordion item.', kind: 'named', required: true },
+            { type: 'T', name: 'headerValue', description: 'The header value of the accordion item.', kind: 'named' },
             { type: 'Widget', name: 'title', description: 'The title widget of the accordion item.', kind: 'named', required: true },
             { type: 'Widget', name: 'child', description: 'The content widget of the accordion item.', kind: 'named', required: true },
           ],
