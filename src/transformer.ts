@@ -52,7 +52,6 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
       const tokens = lexer.tokenize(code)
       const parser = new DartParser()
       const cst = parser.parse(tokens)
-      
       // Collect symbols from CST and build scope tree (inject custom types if provided)
       const { fileScope } = collectFromCST(cst, customTypes?.types)
       // Generate hovers directly from CST (no shallow token-based resolution)
@@ -72,19 +71,18 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
 
       const tokenText = token.content
       const nextChildren: ElementContent[] = []
+      const textToSegment: { [key: string]: any } = {}
       let cursor = 0
       for (const segment of segments) {
         if (cursor < segment.start) {
           nextChildren.push({ type: 'text', value: tokenText.slice(cursor, segment.start) })
         }
-
         const segmentText = tokenText.slice(segment.start, segment.end)
         const normalized = normalizeSpan(segmentText, segment.hover) ?? {
           adjustedText: segmentText,
           pushBefore: '',
           pushAfter: '',
         }
-
         if (normalized.pushBefore.length > 0) {
           nextChildren.push({ type: 'text', value: normalized.pushBefore })
         }
@@ -129,7 +127,7 @@ export function canaryTransformer(options?: CanaryTransformerOptions): ShikiTran
         if (normalized.pushAfter.length > 0) {
           nextChildren.push({ type: 'text', value: normalized.pushAfter })
         }
-
+        
         cursor = segment.end
       }
 
@@ -152,7 +150,7 @@ function normalizeSpan(sanitized: string, hover: Hover): { adjustedText: string;
   let pushBefore = ''
   let pushAfter = ''
   const expected = hover.expectedValue || sanitized
-  if (expected !== sanitized) {
+  if (expected.length < sanitized.length) {
     const { before, after } = getMissingCharacters(expected, sanitized)
     if (before.length === 0 && after.length === 0) {
       return undefined

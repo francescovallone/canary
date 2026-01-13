@@ -52,31 +52,6 @@ class Tree<T> {
   Tree({required this.value, this.children = const []});
 }
 
-void main() {
-  ShadAccordion
-<({String content, String title})>(
-    children: details
-.map
-(
-      (
-detail
-) => ShadAccordionItem
-(
-        value: detail
-,
-        title: Text
-(detail
-.title
-),
-        child: Text
-(detail
-.content
-),
-      ),
-    ),
-  );
-}
-
 extension IterableExtensions<E> on Iterable<E> {
   R foo<R>(R Function(E) f, R defaultValue) {
     return this.map(f).firstWhere((_) => true, orElse: () => defaultValue);

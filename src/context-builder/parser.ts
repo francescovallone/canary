@@ -68,7 +68,19 @@ export namespace CST {
 
   export type Declaration = ClassDeclaration | EnumDeclaration | MixinDeclaration |
     ExtensionDeclaration | TypedefDeclaration | FunctionDeclaration |
-    VariableDeclaration | GetterDeclaration | SetterDeclaration;
+    VariableDeclaration | GetterDeclaration | SetterDeclaration | ConstructorDeclaration;
+
+  export interface ConstructorDeclaration {
+    kind: 'ConstructorDeclaration';
+    metadata: Metadata[];
+    modifiers: Token[];
+    name: Token | null;
+    className: Token;
+    parameters: ParameterList;
+    initializers: ConstructorInitializer[]; // e.g., : super(), this.field = value
+    body: FunctionBody;
+    range: Range;
+  }
 
   export interface ClassDeclaration {
     kind: 'ClassDeclaration';
@@ -183,6 +195,57 @@ export namespace CST {
   }
 
   export type ClassMember = FunctionDeclaration | VariableDeclaration | GetterDeclaration | SetterDeclaration;
+
+  export type ConstructorInitializer = SuperInitializer | RedirectingInitializer | FieldInitializer;
+
+  /**
+   * SuperInitializer - Calls the parent class constructor
+   * 
+   * Examples:
+   *   super()
+   *   super(arg1, arg2)
+   *   super.named()
+   *   super.fromJson(data)
+   */
+  interface SuperInitializer {
+    kind: 'SuperInitializer';
+    constructorName: Token | null;  // null for default super(), or the name token for super.named()
+    arguments: ArgumentList;    // The arguments passed to super
+    range: Range;
+  }
+
+  /**
+   * RedirectingInitializer - Redirects to another constructor in the same class
+   * 
+   * Examples:
+   *   this()
+   *   this(defaultValue)
+   *   this.named()
+   *   this.fromDefaults()
+   */
+  interface RedirectingInitializer {
+    kind: 'RedirectingInitializer';
+    constructorName: Token | null;  // null for this(), or the name token for this.named()
+    arguments: ArgumentList;    // The arguments passed to the other constructor
+    range: Range;
+  }
+
+  /**
+   * FieldInitializer - Initializes a field before the constructor body runs
+   * 
+   * Examples:
+   *   name = value
+   *   count = 0
+   *   this.name = value
+   *   this.items = []
+   */
+  interface FieldInitializer {
+    kind: 'FieldInitializer';
+    isThis: boolean;                // true if prefixed with 'this.'
+    fieldName: Token;               // The field being initialized
+    value: Expression;          // The initialization expression
+    range: Range;
+  }
 
   export interface Metadata {
     kind: 'Metadata';
@@ -831,6 +894,7 @@ export class DartParser {
   private tokens: Token[] = [];
   private current: number = 0;
   private errors: ParseError[] = [];
+  private currentClassName: string | null = null;
 
   // Context tracking for disambiguation
   private context: ParseContext = {
@@ -861,11 +925,11 @@ export class DartParser {
       this.check(TokenType.PART) || this.check(TokenType.LIBRARY)) {
       directives.push(this.parseDirective());
     }
-
     // Parse top-level declarations
     while (!this.isAtEnd()) {
       try {
         const decl = this.parseTopLevelDeclaration();
+        console.log(decl)
         if (decl) {
           declarations.push(decl);
         } else {
@@ -873,6 +937,7 @@ export class DartParser {
           this.advance();
         }
       } catch (e) {
+        console.log(e)
         // Error recovery: synchronize and continue
         this.synchronize();
       }
@@ -943,7 +1008,7 @@ export class DartParser {
   private parseFunctionOrVariableDeclaration(
     metadata: CST.Metadata[],
     modifiers: Token[]
-  ): CST.Declaration {
+  ): CST.Declaration | null {
     const savedContext = { ...this.context };
     this.context.inDeclaration = true;
 
@@ -970,7 +1035,7 @@ export class DartParser {
         range: [metadata[0]?.range[0] ?? modifiers[0]?.start ?? returnType?.range[0] ?? name.start, body.range[1]],
       };
     }
-
+    
     if (this.match(TokenType.SET)) {
       const name = this.consume(TokenType.IDENTIFIER, "Expected setter name");
       const parameters = this.parseParameterList();
@@ -988,8 +1053,78 @@ export class DartParser {
         range: [metadata[0]?.range[0] ?? modifiers[0]?.start ?? returnType?.range[0] ?? name.start, body.range[1]],
       };
     }
+    
+    // Check if has factory (Constructor)
+
+    console.log('Checking for constructor with return type:', returnType, modifiers, modifiers.every(m => m.type !== TokenType.STATIC))
+
+    if ((this.check(TokenType.IDENTIFIER) || this.check(TokenType.FACTORY)) && modifiers.every(m => m.type !== TokenType.STATIC)) {
+      const checkpoint = this.current;
+      console.log('Checking for constructor at', this.peek())
+      const factoryToken = this.peek();
+      const isFactory = factoryToken && factoryToken.type === TokenType.FACTORY;
+      if (isFactory) {
+        this.advance(); // consume 'factory'
+      }
+      const possibleClassName = this.check(TokenType.IDENTIFIER) ? this.advance() : null;
+      console.log('Possible class name for constructor:', possibleClassName)
+      console.log('Current class name:', this.currentClassName)
+      if (possibleClassName && possibleClassName.lexeme === this.currentClassName && (this.check(TokenType.DOT) || this.check(TokenType.LEFT_PAREN))) {
+        let constructorName: Token | null = null;
+        if (this.match(TokenType.DOT)) {
+          constructorName = this.consume(TokenType.IDENTIFIER, "Expected constructor name after '.'");
+        } else {
+          constructorName = possibleClassName;
+        }
+        if (constructorName || isFactory) {
+          // It's a constructor
+          const className = possibleClassName;
+          const parameters = this.parseParameterList();
+          
+          // Initializers
+          let initializers: CST.ConstructorInitializer[] = [];
+          if (this.match(TokenType.COLON)) {
+            initializers = this.parseConstructorInitializers();
+          }
+
+          const body = this.parseFunctionBody();
+
+          this.context = savedContext;
+          console.log('Parsed constructor', {
+            metadata,
+            modifiers,
+            name: constructorName,
+            className,
+            parameters,
+            initializers,
+            body,})
+          if (isFactory) {
+            modifiers.push(factoryToken); // add 'factory' token to modifiers
+          }
+          return {
+            kind: 'ConstructorDeclaration',
+            metadata,
+            modifiers,
+            name: constructorName === className ? null : constructorName,
+            className,
+            parameters,
+            initializers,
+            body,
+            range: [metadata[0]?.range[0] ?? modifiers[0]?.start ?? className.start, body.range[1]],
+          };
+        } else {
+          // Not a constructor, restore position
+          this.current = checkpoint;
+        }
+
+      } else {
+        // Not a constructor, restore position
+        this.current = checkpoint;
+      }
+    }
+    console.log('Not a constructor, parsing function or variable', returnType)
     // Must be function or variable
-    const name = this.consume(TokenType.IDENTIFIER, "Expected name");
+    let name = this.consume(TokenType.IDENTIFIER, "Expected name");
     // Skip whitespace before checking for type params or parens
     this.skipTrivia();
 
@@ -1014,9 +1149,15 @@ export class DartParser {
       };
     }
 
+    if (this.check(TokenType.DOT)) {
+      if (this.peekNext().type === TokenType.IDENTIFIER) {
+        this.advance();
+        name = this.advance(); // consume the identifier after the dot
+      }
+    }
+
     if (this.check(TokenType.LEFT_PAREN)) {
       const params = this.parseParameterList();
-      
       let body: CST.FunctionBody;
       try {
         body = this.parseFunctionBody();
@@ -1029,8 +1170,11 @@ export class DartParser {
           range: [params.range[1], this.previous().end],
         };
       }
-
+      // It means we are in top-level declaration context and we cannot have empty function bodies
       this.context = savedContext;
+      if (!this.currentClassName && body.kind === 'EmptyFunctionBody') {
+        return null;
+      }
       return {
         kind: 'FunctionDeclaration',
         metadata,
@@ -1061,6 +1205,59 @@ export class DartParser {
       initializer,
       range: [metadata[0]?.range[0] ?? modifiers[0]?.start ?? returnType?.range[0] ?? name.start, this.previous().end],
     };
+  }
+
+  // Helper method to parse constructor initializers
+  private parseConstructorInitializers(): CST.ConstructorInitializer[] {
+    const initializers: CST.ConstructorInitializer[] = [];
+    
+    do {
+      if (this.match(TokenType.SUPER)) {
+        // Super constructor call: super() or super.named()
+        let constructorName: Token | null = null;
+        if (this.match(TokenType.DOT)) {
+          constructorName = this.consume(TokenType.IDENTIFIER, "Expected constructor name after 'super.'");
+        }
+        const args = this.parseArgumentList();
+        initializers.push({
+          kind: 'SuperInitializer',
+          constructorName,
+          arguments: args,
+          range: [this.previous().start, args.range[1]],
+        });
+      } else if (this.match(TokenType.THIS)) {
+        // Redirecting constructor: this() or this.named()
+        let constructorName: Token | null = null;
+        if (this.match(TokenType.DOT)) {
+          constructorName = this.consume(TokenType.IDENTIFIER, "Expected constructor name after 'this.'");
+        }
+        const args = this.parseArgumentList();
+        initializers.push({
+          kind: 'RedirectingInitializer',
+          constructorName,
+          arguments: args,
+          range: [this.previous().start, args.range[1]],
+        });
+      } else {
+        // Field initializer: fieldName = expression or this.fieldName = expression
+        const isThis = this.match(TokenType.THIS);
+        if (isThis) {
+          this.consume(TokenType.DOT, "Expected '.' after 'this'");
+        }
+        const fieldName = this.consume(TokenType.IDENTIFIER, "Expected field name");
+        this.consume(TokenType.EQUALS, "Expected '=' in field initializer");
+        const value = this.parseExpression();
+        initializers.push({
+          kind: 'FieldInitializer',
+          isThis,
+          fieldName,
+          value,
+          range: [fieldName.start, value.range[1]],
+        });
+      }
+    } while (this.match(TokenType.COMMA));
+    
+    return initializers;
   }
 
   private parseType(): CST.TypeAnnotation {
@@ -2216,7 +2413,7 @@ export class DartParser {
   private parseClassDeclaration(metadata: CST.Metadata[], modifiers: Token[]): CST.ClassDeclaration {
     const keyword = this.consume(TokenType.CLASS, "Expected 'class'");
     const name = this.consume(TokenType.IDENTIFIER, "Expected class name");
-
+    this.currentClassName = name.lexeme;
     let typeParameters: CST.TypeParameterList | null = null;
     if (this.check(TokenType.LESS) && this.looksLikeTypeParameters()) {
       typeParameters = this.parseTypeParameters();
@@ -2259,7 +2456,7 @@ export class DartParser {
     }
 
     const closeBrace = this.consume(TokenType.RIGHT_BRACE, "Expected '}' after class body");
-
+    this.currentClassName = null;
     return {
       kind: 'ClassDeclaration',
       metadata,

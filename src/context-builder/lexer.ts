@@ -185,7 +185,6 @@ export class DartLexer {
     
     // Identifiers and keywords
     if (this.isAlpha(c) || c === '_' || c === '$') {
-      console.log('Starting identifier scan at:', c);
       return this.identifier(interpolationStart);
     }
     
@@ -403,7 +402,6 @@ export class DartLexer {
     const endPattern = isMultiline ? quote + quote + quote : quote;
     
     const interpolations: Token[][] = [];
-    console.log('Starting string scan, multiline:', quote);
     while (!this.isAtEnd()) {
       // Check for end
       if (this.matchSequence(endPattern)) {
@@ -414,12 +412,10 @@ export class DartLexer {
       if (this.peek() === '$') {
         this.advance(); // consume $
         const start = this.current
-        console.log('Peek after $:', this.peek());
         if (this.peek() === '{') {
           // ${expression} - need to tokenize the expression
           this.advance(); // consume {
           const exprTokens = this.scanInterpolation(start + 1);
-          console.log('Completed interpolation:', exprTokens);
           interpolations.push(exprTokens);
           continue;
         } else if (this.isAlpha(this.peek()) || this.peek() === '_') {
@@ -452,11 +448,9 @@ export class DartLexer {
     }
     
     const token = this.makeToken(TokenType.STRING, this.source.substring(this.start, this.current));
-    console.log('Completed string token:', token);
     if (interpolations.length > 0) {
       token.interpolations = interpolations;
     }
-    console.log('String token with interpolations:', token.interpolations);
     return token;
   }
 
@@ -477,7 +471,6 @@ export class DartLexer {
 
       tokens.push(token);
     }
-    console.log('Scanned interpolation tokens:', tokens);
     return tokens;
   }
 

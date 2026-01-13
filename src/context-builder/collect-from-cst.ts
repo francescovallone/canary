@@ -243,6 +243,7 @@ function collectDeclaration(
   nodes: Node[],
   currentClass: string | null
 ): void {
+  console.log('Collecting declaration of kind:', decl.kind, 'currentClass:', currentClass, decl.name?.lexeme)
   switch (decl.kind) {
     case 'ClassDeclaration':
       collectClass(decl, scope, nodes)
@@ -271,6 +272,38 @@ function collectDeclaration(
     case 'TypedefDeclaration':
       collectTypedef(decl, scope, nodes)
       break
+    case 'ConstructorDeclaration':
+      collectConstructor(decl, scope, nodes, currentClass)
+      break
+  }
+}
+
+function collectConstructor(decl: any, parentScope: Scope, nodes: Node[], currentClass: string | null): void {
+  const constructorName = decl.name ? decl.name.lexeme : null; // unnamed constructor uses class name
+  const constructorScope = new Scope(ScopeKind.Constructor, parentScope)
+  console.log('Collecting constructor:', constructorName, 'for class:', currentClass, decl)
+  const symName = `${currentClass}${constructorName ? `.${constructorName}` : ''}`
+  const node: Node = {
+    kind: NodeKind.Constructor,
+    name: constructorName,
+    start: decl.name ? decl.name.start : -1,
+    end: decl.name ? decl.name.end : -1,
+    scope: constructorScope,
+    type: currentClass || undefined,
+    parentClass: currentClass ?? undefined,
+    modifiers: getModifiers(decl.modifiers),
+  }
+  nodes.push(node)
+  parentScope.define({
+    name: symName,
+    kind: SymbolKind.Constructor,
+    node,
+  })
+  // Collect parameters
+  if (decl.parameters?.parameters) {
+    for (const param of decl.parameters.parameters) {
+      collectParameter(param, constructorScope, nodes, currentClass)
+    }
   }
 }
 
@@ -495,6 +528,7 @@ function collectVariable(
     node.initializerStart = decl.initializer.range[0]
     node.initializerEnd = decl.initializer.range[1]
   }
+  console.log('Variable node:', node)
 
   nodes.push(node)
   parentScope.define({
@@ -886,6 +920,7 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
     }
     case 'MethodInvocation': {
       // Infer return type from method invocation
+      console.log('Inferring type from MethodInvocation:', expr)
       const targetType = inferTypeFromExpression(expr.target, scope)
       if (targetType) {
         const methodSym = resolveClassMemberInScope(targetType, expr.methodName?.lexeme, scope)
@@ -893,6 +928,25 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
           // Apply inheritance type substitution if the method is from a parent class
           const substitutedType = applyInheritanceTypeSubstitution(methodSym, targetType, scope)
           return substitutedType ?? methodSym.node.type
+        }
+      }
+      // Check if it is a named or factory constructor or if it is a static method
+      if (expr.target?.kind === 'Identifier') {
+        const className = expr.target.name.lexeme
+        const classSym = scope.resolve(className)
+        if (classSym?.kind === SymbolKind.Class) {
+          // Check for named/factory constructor
+          const constructorSym = classSym.node.scope?.resolve(`${className}.${expr.methodName?.lexeme}`)
+          if (constructorSym?.kind === SymbolKind.Constructor) {
+            return className
+          }
+          // Check for static method
+          const staticMethodSym = classSym.node.scope?.resolve(expr.methodName?.lexeme || '')
+          if (staticMethodSym?.kind === SymbolKind.Method && 
+              staticMethodSym.node.modifiers?.includes('static') &&
+              staticMethodSym.node.type) {
+            return staticMethodSym.node.type
+          }
         }
       }
       return undefined

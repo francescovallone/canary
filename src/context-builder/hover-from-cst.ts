@@ -192,6 +192,30 @@ function collectHoversFromDeclaration(
     case 'TypedefDeclaration':
       collectHoversFromTypedef(decl, scope, hovers, ctx)
       break
+    case 'ConstructorDeclaration':
+      collectHoversFromConstructor(decl, scope, hovers, ctx)
+      break
+  }
+}
+
+function collectHoversFromConstructor(
+  decl: any,
+  parentScope: Scope,
+  hovers: Hover[],
+  ctx: HoverContext
+): void {
+  const className = decl.className.lexeme
+  const constructorName = decl.name ? decl.name.lexeme : null
+  const sym = parentScope.resolve(`${className}${constructorName ? `.${constructorName}` : ''}`)
+  if (sym) {
+    const start = decl.className.start;
+    const end = constructorName ? decl.name.end : decl.className.end;
+    hovers.push({
+      range: { start, end },
+      markdown: formatSymbol(sym),
+      expectedValue: constructorName ? `${className}.${constructorName}` : className,
+      documentation: buildDocumentation(sym),
+    })
   }
 }
 
@@ -481,6 +505,7 @@ function collectHoversFromVariable(
 
   // Collect hovers from initializer expression
   if (decl.initializer) {
+    console.log('Collecting hovers from variable initializer:', decl)
     collectHoversFromExpression(decl.initializer, scope, hovers, ctx)
   }
 }
@@ -941,8 +966,15 @@ function collectHoversFromMethodCall(
   
   let methodSym: SymbolEntry | undefined
   let typeArgMap = new Map<string, string>()
+  console.log('Method call target type inferred as:', targetType)
   if (targetType) {
     methodSym = resolveTypeMember(targetType, methodName, ctx)
+    console.log('Resolved method symbol for', methodName, ':', methodSym)
+    if (methodSym === undefined) {
+      // Maybe it is a constructor call
+      methodSym = resolveTypeMember(targetType, `${targetType}.${methodName}`, ctx)
+    }
+    console.log('After checking constructor, method symbol is:', methodSym)
     const typeParams = methodSym?.node.typeParameters || []
     if (methodSym) {
       // Build type argument map from the target type (e.g., List<RecordType> -> E=RecordType)
@@ -1551,7 +1583,8 @@ function formatSymbolWithSubstitution(sym: SymbolEntry, typeMap: Map<string, str
     return `${type}<${Array.from(typeMap.values()).join(', ')}>(${parameterBlock})`
   }
   if (sym.kind === SymbolKind.Method || sym.kind === SymbolKind.Function) {
-    return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}(${parameterBlock})`
+    const modifierStr = (sym.node.modifiers?.length ?? 0) > 0 ? sym.node.modifiers?.join(' ') + ' ' : ''
+    return `${modifierStr}${type}${sym.node.nullable ? '?' : ''} ${sym.name}(${parameterBlock})`
   }
   
   // Fallback to normal formatting
@@ -1828,8 +1861,9 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
     
     case SymbolKind.Function:
     case SymbolKind.Method:
-      return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
-    
+      const modifierStr = (sym.node.modifiers?.length ?? 0) > 0 ? sym.node.modifiers?.join(' ') + ' ' : ''
+      return `${modifierStr}${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
+
     case SymbolKind.Constructor:
       const modifier = sym.node.modifiers?.[0] === undefined ? '' : `${sym.node.modifiers?.join(' ')} `
       return `${modifier}${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
