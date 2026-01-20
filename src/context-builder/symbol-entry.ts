@@ -16,6 +16,8 @@ export enum SymbolKind {
   Function = 'function',
   Constructor = 'constructor',
   InstanceExpression = 'instance_expression',
+  ConstructorInitializer = 'constructor_initializer',
+  Extension = 'extension',
   Accessor = 'accessor',
   TemplateString = 'template_string',
   Typedef = 'typedef',

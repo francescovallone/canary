@@ -19,7 +19,7 @@
 
 .canary-hover-popover {
 	position: absolute;
-	z-index: 40;
+	z-index: calc(var(--vp-z-index-local-nav) - 1);
 	display: none;
 	max-width: 600px;
 	border: 1px solid var(--canary-border-color);

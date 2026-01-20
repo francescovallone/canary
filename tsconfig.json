@@ -9,5 +9,5 @@
     "types": ["vitest"],
     "resolveJsonModule": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "examples/vitepress/.vitepress/serinus-types.ts"]
 }

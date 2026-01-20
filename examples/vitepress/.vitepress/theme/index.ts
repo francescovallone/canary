@@ -1,19 +1,17 @@
 import DefaultTheme from 'vitepress/theme'
 import './style.css'
 import { EnhanceAppContext } from 'vitepress'
-import { setupCanaryTheme } from '../../../src/canary.client'
+import { setupCanaryTheme } from '@avesbox/canary'
 import TwoslashFloatingVue
  from '@shikijs/vitepress-twoslash/client'
-import Theme
- from 'vitepress/theme'
 
 import '@shikijs/vitepress-twoslash/style.css'
-import '../../../src/canary.css'
+import '@avesbox/canary/style.css'
 
 export default {
     extends: DefaultTheme,
     enhanceApp(ctx: EnhanceAppContext) {
-        setupCanaryTheme(ctx)
+        setupCanaryTheme()
         ctx.app.use(TwoslashFloatingVue) 
     }
 }

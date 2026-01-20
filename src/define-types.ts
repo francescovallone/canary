@@ -33,10 +33,18 @@ export type Parameter = {
   required?: boolean
 }
 
-export type Constructor = { description?: string; parameters: Parameter[], name?: string, typeParameters?: string[], typeArguments?: string[] }
+export type Constructor = { description?: string; parameters: Parameter[], name?: string, typeParameters?: string[], typeArguments?: string[], factory?: boolean, named?: boolean }
+
+export interface CustomVariable {
+  name: string
+  description?: string
+  type: string
+  kind?: 'variable'
+  package?: string
+}
 
 export interface CustomTypesConfig {
-  types: (CustomType | CustomFunction)[]
+  types: (CustomType | CustomFunction | CustomVariable)[]
 }
 
 /**
@@ -81,4 +89,8 @@ export function defineCustomTypes(config: CustomTypesConfig): CustomTypesConfig 
  */
 export function defineType(type: CustomType): CustomType {
   return type
+}
+
+export function defineFunction(func: CustomFunction): CustomFunction {
+  return func
 }

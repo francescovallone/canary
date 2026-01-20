@@ -11,10 +11,39 @@ interface ParseError {
 export namespace CST {
   export type Range = [number, number];
 
+  export type Notation = ExtractNotation | CutBeforeNotation | CutAfterNotation | CutStartNotation | CutEndNotation;
+
+  export interface ExtractNotation {
+    kind: 'ExtractNotation';
+    line: number;
+    pointTo: number;
+  }
+
+  export interface CutBeforeNotation {
+    kind: 'CutBeforeNotation';
+    line: number;
+  }
+
+  export interface CutAfterNotation {
+    kind: 'CutAfterNotation';
+    line: number;
+  }
+
+  export interface CutStartNotation {
+    kind: 'CutStartNotation';
+    line: number;
+  }
+
+  export interface CutEndNotation {
+    kind: 'CutEndNotation';
+    line: number;
+  }
+
   export interface CompilationUnit {
     kind: 'CompilationUnit';
     directives: Directive[];
     declarations: Declaration[];
+    notations: Notation[];
     range: Range;
   }
 
@@ -212,6 +241,7 @@ export namespace CST {
     constructorName: Token | null;  // null for default super(), or the name token for super.named()
     arguments: ArgumentList;    // The arguments passed to super
     range: Range;
+    columns: [number, number];
   }
 
   /**
@@ -894,6 +924,7 @@ export class DartParser {
   private tokens: Token[] = [];
   private current: number = 0;
   private errors: ParseError[] = [];
+  private notations: CST.Notation[] = [];
   private currentClassName: string | null = null;
 
   // Context tracking for disambiguation
@@ -929,7 +960,6 @@ export class DartParser {
     while (!this.isAtEnd()) {
       try {
         const decl = this.parseTopLevelDeclaration();
-        console.log(decl)
         if (decl) {
           declarations.push(decl);
         } else {
@@ -937,7 +967,6 @@ export class DartParser {
           this.advance();
         }
       } catch (e) {
-        console.log(e)
         // Error recovery: synchronize and continue
         this.synchronize();
       }
@@ -947,6 +976,7 @@ export class DartParser {
       kind: 'CompilationUnit',
       directives,
       declarations,
+      notations: this.notations,
       range: [0, this.tokens[this.tokens.length - 1].end],
     };
   }
@@ -977,15 +1007,15 @@ export class DartParser {
       return this.parseEnumDeclaration(metadata, []);
     }
 
-    if (this.check(TokenType.MIXIN)) {
+    if (this.checkContextualKeyword('mixin')) {
       return this.parseMixinDeclaration(metadata, []);
     }
 
-    if (this.check(TokenType.EXTENSION)) {
+    if (this.checkContextualKeyword('extension')) {
       return this.parseExtensionDeclaration(metadata, []);
     }
 
-    if (this.check(TokenType.TYPEDEF)) {
+    if (this.checkContextualKeyword('typedef')) {
       return this.parseTypedefDeclaration(metadata, []);
     }
 
@@ -993,7 +1023,7 @@ export class DartParser {
     const modifiers: Token[] = [];
     while (this.check(TokenType.ABSTRACT) || this.check(TokenType.CONST) ||
       this.check(TokenType.EXTERNAL) || this.check(TokenType.FINAL) ||
-      this.check(TokenType.LATE) || this.check(TokenType.STATIC)) {
+      this.checkContextualKeyword('late') || this.check(TokenType.STATIC)) {
       modifiers.push(this.advance());
     }
 
@@ -1020,7 +1050,7 @@ export class DartParser {
     }
 
     // Check for getter/setter
-    if (this.match(TokenType.GET)) {
+    if (this.matchContextualKeyword('get')) {
       const name = this.consume(TokenType.IDENTIFIER, "Expected getter name");
       const body = this.parseFunctionBody();
 
@@ -1036,7 +1066,7 @@ export class DartParser {
       };
     }
     
-    if (this.match(TokenType.SET)) {
+    if (this.matchContextualKeyword('set')) {
       const name = this.consume(TokenType.IDENTIFIER, "Expected setter name");
       const parameters = this.parseParameterList();
       const body = this.parseFunctionBody();
@@ -1055,20 +1085,14 @@ export class DartParser {
     }
     
     // Check if has factory (Constructor)
-
-    console.log('Checking for constructor with return type:', returnType, modifiers, modifiers.every(m => m.type !== TokenType.STATIC))
-
-    if ((this.check(TokenType.IDENTIFIER) || this.check(TokenType.FACTORY)) && modifiers.every(m => m.type !== TokenType.STATIC)) {
+    if ((this.check(TokenType.IDENTIFIER) || this.checkContextualKeyword('factory')) && modifiers.every(m => m.type !== TokenType.STATIC)) {
       const checkpoint = this.current;
-      console.log('Checking for constructor at', this.peek())
       const factoryToken = this.peek();
-      const isFactory = factoryToken && factoryToken.type === TokenType.FACTORY;
+      const isFactory = factoryToken && this.isContextualKeywordToken(factoryToken, 'factory');
       if (isFactory) {
         this.advance(); // consume 'factory'
       }
       const possibleClassName = this.check(TokenType.IDENTIFIER) ? this.advance() : null;
-      console.log('Possible class name for constructor:', possibleClassName)
-      console.log('Current class name:', this.currentClassName)
       if (possibleClassName && possibleClassName.lexeme === this.currentClassName && (this.check(TokenType.DOT) || this.check(TokenType.LEFT_PAREN))) {
         let constructorName: Token | null = null;
         if (this.match(TokenType.DOT)) {
@@ -1090,14 +1114,6 @@ export class DartParser {
           const body = this.parseFunctionBody();
 
           this.context = savedContext;
-          console.log('Parsed constructor', {
-            metadata,
-            modifiers,
-            name: constructorName,
-            className,
-            parameters,
-            initializers,
-            body,})
           if (isFactory) {
             modifiers.push(factoryToken); // add 'factory' token to modifiers
           }
@@ -1122,7 +1138,6 @@ export class DartParser {
         this.current = checkpoint;
       }
     }
-    console.log('Not a constructor, parsing function or variable', returnType)
     // Must be function or variable
     let name = this.consume(TokenType.IDENTIFIER, "Expected name");
     // Skip whitespace before checking for type params or parens
@@ -1155,11 +1170,18 @@ export class DartParser {
         name = this.advance(); // consume the identifier after the dot
       }
     }
-
     if (this.check(TokenType.LEFT_PAREN)) {
       const params = this.parseParameterList();
       let body: CST.FunctionBody;
       try {
+        if (this.isContextualKeywordToken(this.peek(), 'async') || this.check(TokenType.SYNC)) {
+          modifiers.push(this.peek());
+          this.advance();
+        }
+        if (this.peek().type === TokenType.STAR) {
+          modifiers.push(this.peek());
+          this.advance();
+        }
         body = this.parseFunctionBody();
       } catch (e) {
         // If body parsing fails, create an incomplete body and synchronize
@@ -1214,6 +1236,7 @@ export class DartParser {
     do {
       if (this.match(TokenType.SUPER)) {
         // Super constructor call: super() or super.named()
+        const superToken = this.previous();
         let constructorName: Token | null = null;
         if (this.match(TokenType.DOT)) {
           constructorName = this.consume(TokenType.IDENTIFIER, "Expected constructor name after 'super.'");
@@ -1223,7 +1246,14 @@ export class DartParser {
           kind: 'SuperInitializer',
           constructorName,
           arguments: args,
-          range: [this.previous().start, args.range[1]],
+          range: [
+            superToken.start,
+            constructorName ? constructorName.end : superToken.end
+          ],
+          columns: [
+            superToken.column,
+            superToken.column + superToken.lexeme.length
+          ]
         });
       } else if (this.match(TokenType.THIS)) {
         // Redirecting constructor: this() or this.named()
@@ -1755,8 +1785,8 @@ export class DartParser {
       
       // After type, should be an identifier (the name), get, or set
       const result = this.check(TokenType.IDENTIFIER) || 
-                     this.check(TokenType.GET) || 
-                     this.check(TokenType.SET);
+             this.checkContextualKeyword('get') || 
+             this.checkContextualKeyword('set');
       this.current = savedCurrent;
       return result;
       
@@ -1867,10 +1897,25 @@ export class DartParser {
   }
 
   private parsePrimaryExpression(): CST.Expression {
-    // Prefix operators: !, -, ~, ++, --, await
-    if (this.isUnaryOperator(this.peek().type)) {
+    // Prefix operators: !, -, ~, ++, --
+    // Note: await is handled separately because it has lower precedence than postfix operators
+    const unaryCandidate = this.peek();
+    if (this.isUnaryOperator(unaryCandidate.type) && !this.isContextualKeywordToken(unaryCandidate, 'await')) {
       const operator = this.advance();
       const operand = this.parsePrimaryExpression();
+      return {
+        kind: 'UnaryExpression',
+        operator,
+        operand,
+        range: [operator.start, operand.range[1]],
+      };
+    }
+
+    // await has lower precedence than postfix operators (., (), [])
+    // So "await foo.bar()" should be parsed as "await (foo.bar())"
+    if (this.isContextualKeywordToken(this.peek(), 'await')) {
+      const operator = this.advance();
+      const operand = this.parseUnaryExpression();
       return {
         kind: 'UnaryExpression',
         operator,
@@ -1985,7 +2030,6 @@ export class DartParser {
         range: [name.start, name.end],
       };
     }
-
     // Error recovery
     throw this.error(this.peek(), "Expected expression");
   }
@@ -2268,6 +2312,10 @@ export class DartParser {
         case TokenType.IMPORT:
         case TokenType.EXPORT:
           return;
+        default:
+          if (this.checkContextualKeyword('mixin') || this.checkContextualKeyword('extension') || this.checkContextualKeyword('typedef')) {
+            return;
+          }
       }
       
       // Move forward
@@ -2346,6 +2394,31 @@ export class DartParser {
     return false;
   }
 
+  // Contextual keyword helpers (e.g., 'on' can be an identifier or keyword depending on position)
+  private isContextualKeywordToken(token: Token, lexeme: string): boolean {
+    return token.lexeme === lexeme;
+  }
+
+  private checkContextualKeyword(lexeme: string): boolean {
+    if (this.isAtEnd()) return false;
+    return this.isContextualKeywordToken(this.peek(), lexeme);
+  }
+
+  private matchContextualKeyword(lexeme: string): boolean {
+    if (this.checkContextualKeyword(lexeme)) {
+      this.advance();
+      return true;
+    }
+    return false;
+  }
+
+  private consumeContextualKeyword(lexeme: string, message: string): Token {
+    if (this.matchContextualKeyword(lexeme)) {
+      return this.previous();
+    }
+    throw this.error(this.peek(), message);
+  }
+
   private peek(): Token {
     if (this.current >= this.tokens.length) {
       return this.tokens[this.tokens.length - 1];
@@ -2371,6 +2444,40 @@ export class DartParser {
     // Skip whitespace, newlines, and comments
     while (!this.isAtEnd()) {
       const type = this.peek().type;
+      if (type === TokenType.COMMENT) {
+        const token = this.peek();
+        if (token.lexeme.endsWith('^?')) {
+          this.notations.push({
+            kind: 'ExtractNotation',
+            line: token.line,
+            pointTo: token.lexeme.length - 1, // position of ^ 
+          })
+        }
+        // if (token.lexeme.endsWith('---cut-start---')) {
+        //   this.notations.push({
+        //     kind: 'CutStartNotation',
+        //     line: token.line,
+        //   })
+        // }
+        // if (token.lexeme.endsWith('---cut-end---')) {
+        //   this.notations.push({
+        //     kind: 'CutEndNotation',
+        //     line: token.line,
+        //   })
+        // }
+        // if (token.lexeme.endsWith('---cut-before---') || token.lexeme.endsWith('---cut---')) {
+        //   this.notations.push({
+        //     kind: 'CutBeforeNotation',
+        //     line: token.line,
+        //   })
+        // }
+        // if (token.lexeme.endsWith('---cut-after---')) {
+        //   this.notations.push({
+        //     kind: 'CutAfterNotation',
+        //     line: token.line,
+        //   })
+        // }
+      }
       if (type === TokenType.WHITESPACE || 
           type === TokenType.NEWLINE || 
           type === TokenType.COMMENT ||
@@ -2407,6 +2514,51 @@ export class DartParser {
       type === TokenType.PLUS_PLUS ||
       type === TokenType.MINUS_MINUS ||
       type === TokenType.AWAIT;
+  }
+
+  /**
+   * Parse a unary expression (primary + postfix operators like ., (), [])
+   * This is used for await's operand since await binds less tightly than postfix operators
+   */
+  private parseUnaryExpression(): CST.Expression {
+    let left = this.parsePrimaryExpression();
+    
+    // Apply postfix operators
+    while (true) {
+      // Member access: . or ?.
+      if (this.check(TokenType.DOT) || this.check(TokenType.QUESTION_DOT)) {
+        left = this.parseMemberAccess(left);
+        continue;
+      }
+
+      // Function call: ()
+      if (this.check(TokenType.LEFT_PAREN)) {
+        left = this.parseFunctionCall(left);
+        continue;
+      }
+
+      // Index: []
+      if (this.check(TokenType.LEFT_BRACKET)) {
+        left = this.parseIndexAccess(left);
+        continue;
+      }
+
+      // Postfix increment/decrement
+      if (this.isPostfixOperator(this.peek().type)) {
+        const operator = this.advance();
+        left = {
+          kind: 'PostfixExpression',
+          operand: left,
+          operator,
+          range: [left.range[0], operator.end],
+        };
+        continue;
+      }
+
+      break;
+    }
+    
+    return left;
   }
 
   // Declaration parsing methods
@@ -2448,7 +2600,7 @@ export class DartParser {
       const memberModifiers: Token[] = [];
 
       while (this.check(TokenType.STATIC) || this.check(TokenType.FINAL) || this.check(TokenType.CONST) ||
-        this.check(TokenType.LATE) || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
+        this.checkContextualKeyword('late') || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
         memberModifiers.push(this.advance());
       }
 
@@ -2513,7 +2665,7 @@ export class DartParser {
   }
 
   private parseMixinDeclaration(metadata: CST.Metadata[], modifiers: Token[]): CST.MixinDeclaration {
-    const keyword = this.consume(TokenType.MIXIN, "Expected 'mixin'");
+    const keyword = this.consumeContextualKeyword('mixin', "Expected 'mixin'");
     const name = this.consume(TokenType.IDENTIFIER, "Expected mixin name");
 
     let typeParameters: CST.TypeParameterList | null = null;
@@ -2522,7 +2674,7 @@ export class DartParser {
     }
 
     let onClause: CST.TypeAnnotation[] = [];
-    if (this.match(TokenType.ON)) {
+    if (this.matchContextualKeyword('on')) {
       onClause.push(this.parseType());
       while (this.match(TokenType.COMMA)) {
         onClause.push(this.parseType());
@@ -2545,7 +2697,7 @@ export class DartParser {
       const memberModifiers: Token[] = [];
 
       while (this.check(TokenType.STATIC) || this.check(TokenType.FINAL) || this.check(TokenType.CONST) ||
-        this.check(TokenType.LATE) || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
+        this.checkContextualKeyword('late') || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
         memberModifiers.push(this.advance());
       }
 
@@ -2569,7 +2721,7 @@ export class DartParser {
   }
 
   private parseExtensionDeclaration(metadata: CST.Metadata[], modifiers: Token[]): CST.ExtensionDeclaration {
-    const keyword = this.consume(TokenType.EXTENSION, "Expected 'extension'");
+    const keyword = this.consumeContextualKeyword('extension', "Expected 'extension'");
 
     let name: Token | null = null;
     if (this.check(TokenType.IDENTIFIER)) {
@@ -2581,7 +2733,7 @@ export class DartParser {
       typeParameters = this.parseTypeParameters();
     }
 
-    this.consume(TokenType.ON, "Expected 'on' in extension declaration");
+    this.consumeContextualKeyword('on', "Expected 'on' in extension declaration");
     const extendedType = this.parseType();
 
     this.consume(TokenType.LEFT_BRACE, "Expected '{' after extension header");
@@ -2592,7 +2744,7 @@ export class DartParser {
       const memberModifiers: Token[] = [];
 
       while (this.check(TokenType.STATIC) || this.check(TokenType.FINAL) || this.check(TokenType.CONST) ||
-        this.check(TokenType.LATE) || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
+        this.checkContextualKeyword('late') || this.check(TokenType.ABSTRACT) || this.check(TokenType.EXTERNAL)) {
         memberModifiers.push(this.advance());
       }
 
@@ -2615,7 +2767,7 @@ export class DartParser {
   }
 
   private parseTypedefDeclaration(metadata: CST.Metadata[], modifiers: Token[]): CST.TypedefDeclaration {
-    const keyword = this.consume(TokenType.TYPEDEF, "Expected 'typedef'");
+    const keyword = this.consumeContextualKeyword('typedef', "Expected 'typedef'");
 
     // Modern syntax: typedef Name<T> = Type; or typedef Name = Type;
     // Legacy syntax: typedef ReturnType Name(params);
@@ -2725,6 +2877,7 @@ export class DartParser {
       };
     }
 
+
     // Block body: { ... }
     return this.parseBlock();
   }
@@ -2747,9 +2900,8 @@ export class DartParser {
 
   private parseStatement(): CST.Statement {
     // Variable declaration
-    if (this.check(TokenType.VAR) || this.check(TokenType.FINAL) ||
-        this.check(TokenType.CONST) || this.check(TokenType.LATE)) {
-      this.advance(); // Consume the keyword so previous() works
+    if (this.match(TokenType.VAR) || this.match(TokenType.FINAL) ||
+        this.match(TokenType.CONST) || this.matchContextualKeyword('late')) {
       return this.parseVariableDeclarationStatement();
     }
 
@@ -3050,11 +3202,11 @@ export class DartParser {
     const body = this.parseBlock();
 
     const catchClauses: CST.CatchClause[] = [];
-    while (this.match(TokenType.ON) || this.match(TokenType.CATCH)) {
+    while (this.matchContextualKeyword('on') || this.match(TokenType.CATCH)) {
       const onOrCatch = this.previous();
 
       let exceptionType: CST.TypeAnnotation | null = null;
-      if (onOrCatch.type === TokenType.ON) {
+      if (this.isContextualKeywordToken(onOrCatch, 'on')) {
         exceptionType = this.parseType();
       }
 
@@ -3145,7 +3297,7 @@ export class DartParser {
     const metadata = this.parseMetadata();
 
     let isRequired = false;
-    if (this.match(TokenType.REQUIRED)) {
+    if (this.matchContextualKeyword('required')) {
       isRequired = true;
     }
 
@@ -3286,7 +3438,7 @@ export class DartParser {
         if (this.match(TokenType.LEFT_BRACE)) {
           while (!this.check(TokenType.RIGHT_BRACE) && !this.isAtEnd()) {
             let isRequired = false;
-            if (this.match(TokenType.REQUIRED)) {
+            if (this.matchContextualKeyword('required')) {
               isRequired = true;
             }
             const type = this.parseType();
@@ -3953,7 +4105,7 @@ export class DartParser {
           if (depth === 0) {
             this.advance();
             this.skipTrivia(); // Skip whitespace before checking for => or {
-            const result = this.check(TokenType.ARROW) || this.check(TokenType.LEFT_BRACE) || this.check(TokenType.ASYNC);
+            const result = this.check(TokenType.ARROW) || this.check(TokenType.LEFT_BRACE) || this.checkContextualKeyword('async');
             this.current = savedCurrent;
             return result;
           }
@@ -3985,7 +4137,7 @@ export class DartParser {
         asPrefix = this.consume(TokenType.IDENTIFIER, "Expected prefix identifier");
       }
 
-      while (this.check(TokenType.SHOW) || this.check(TokenType.HIDE)) {
+      while (this.checkContextualKeyword('show') || this.checkContextualKeyword('hide')) {
         const combinatorType = this.advance();
         const identifiers: Token[] = [];
 
@@ -3995,7 +4147,7 @@ export class DartParser {
         }
 
         combinators.push({
-          kind: combinatorType.type === TokenType.SHOW ? 'ShowCombinator' : 'HideCombinator',
+          kind: this.isContextualKeywordToken(combinatorType, 'show') ? 'ShowCombinator' : 'HideCombinator',
           identifiers,
           range: [combinatorType.start, identifiers[identifiers.length - 1].end],
         });

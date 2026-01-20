@@ -1,21 +1,52 @@
 {
-  "name": "canary",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "author": "",
-  "license": "ISC",
+  "name": "@avesbox/canary",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A vitepress transformer for rendering Dart code examples with advanced features like inline annotations, custom types, and enhanced syntax highlighting.",
+  "author": "Francesco Vallone",
+  "license": "MIT",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./style.css": "./style.css"
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "*.css",
+    "dist"
+  ],
   "dependencies": {
+    "@types/hast": "^3.0.4",
     "hast-util-to-html": "^9.0.5",
     "shiki": "^3.20.0",
-    "vitepress": "2.0.0-alpha.15"
-  },
-  "devDependencies": {
-    "@types/hast": "^3.0.4",
     "typescript": "^5.6.3",
-    "vitest": "^1.4.0"
+    "vue": "^3.5.26"
   },
   "scripts": {
-    "test": "vitest run"
-  }
+    "test": "vitest run",
+    "build": "unbuild",
+    "dev": "unbuild --stub",
+    "prepublishOnly": "nr build"
+  },
+  "directories": {
+    "example": "example",
+    "test": "test"
+  },
+  "devDependencies": {
+    "unbuild": "^3.6.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/francescovallone/canary.git"
+  },
+  "keywords": [
+    "vitepress-plugin",
+    "shiki"
+  ],
+  "bugs": {
+    "url": "https://github.com/francescovallone/canary/issues"
+  },
+  "homepage": "https://github.com/francescovallone/canary#readme"
 }

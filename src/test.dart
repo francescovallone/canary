@@ -25,6 +25,7 @@ class ShadAccordionItem<T> {
   final T value;
   final Widget title;
   final Widget child;
+  final int index = 0;
 
   ShadAccordionItem({
     required this.value,
@@ -50,6 +51,10 @@ class Tree<T> {
   List<Tree<T>> children;
 
   Tree({required this.value, this.children = const []});
+
+  static staticMethod() {
+    print('This is a static method.');
+  }
 }
 
 extension IterableExtensions<E> on Iterable<E> {
@@ -58,6 +63,11 @@ extension IterableExtensions<E> on Iterable<E> {
   }
 }
 
-String bark(String sound) {
+String bark(Text sound) {
   return "Woof! Woof! ${sound}";
+}
+
+Future<void> main() async {
+  final test = Tree(value: 1);
+  
 }

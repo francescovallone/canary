@@ -7,24 +7,42 @@ import { Token } from './lexer'
 import { Node, NodeKind, ParameterKind } from './node'
 import { Scope, ScopeKind } from './scope'
 import { SymbolEntry, SymbolKind } from './symbol-entry'
-import type { CustomFunction, CustomType, Parameter as CustomParameter, Constructor } from '../define-types'
+import type { CustomFunction, CustomType, Parameter as CustomParameter, Constructor, CustomVariable } from '../define-types'
 import coreTypes from './core-types'
 import { CST } from './parser'
 
 // --- Custom types injection -------------------------------------------------
 
 function injectCustomTypes(
-  types: Array<CustomType | CustomFunction>,
+  types: Array<CustomType | CustomFunction | CustomVariable>,
   fileScope: Scope,
   nodes: Node[]
 ): void {
   for (const ct of types) {
     if ((ct as CustomFunction).returnType !== undefined || ct.kind === 'function') {
       registerCustomFunction(ct as CustomFunction, fileScope, nodes)
-    } else {
+    } else if (ct.kind === 'variable') {
+      registerCustomVariable(ct as CustomVariable, fileScope, nodes)
+    }  else {
       registerCustomType(ct as CustomType, fileScope, nodes)
     }
   }
+}
+
+function registerCustomVariable(variable: CustomVariable, fileScope: Scope, nodes: Node[]): void {
+  const node: Node = {
+    kind: NodeKind.Variable,
+    name: variable.name,
+    start: -1,
+    end: -1,
+    scope: fileScope,
+    type: variable.type,
+    documentation: variable.description,
+    package: variable.package,
+    columns: [-1, -1],
+  }
+  nodes.push(node)
+  fileScope.define({ name: variable.name, kind: SymbolKind.Variable, node })
 }
 
 function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): void {
@@ -42,6 +60,7 @@ function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): 
     package: type.package,
     modifiers: type.modifiers,
     implementsTypes: type.implementsTypes ?? [],
+    columns: [-1, -1],
   }
 
   nodes.push(classNode)
@@ -49,20 +68,20 @@ function registerCustomType(type: CustomType, fileScope: Scope, nodes: Node[]): 
 
   // Constructors
   for (const ctor of type.constructors ?? []) {
-    registerCustomConstructor(type.name, ctor, classScope, nodes)
+    registerCustomConstructor(type.name, ctor, classScope, nodes, type.package)
   }
 
   // Instance members
   if (type.members) {
     for (const [name, member] of Object.entries(type.members)) {
-      registerCustomMember(name, member, classScope, nodes, type.name, false)
+      registerCustomMember(name, member, classScope, nodes, type.name, false, type.package)
     }
   }
 
   // Static members
   if (type.staticMembers) {
     for (const [name, member] of Object.entries(type.staticMembers)) {
-      registerCustomMember(name, member, classScope, nodes, type.name, true)
+      registerCustomMember(name, member, classScope, nodes, type.name, true, type.package)
     }
   }
 }
@@ -71,12 +90,14 @@ function registerCustomConstructor(
   className: string,
   ctor: Constructor,
   classScope: Scope,
-  nodes: Node[]
+  nodes: Node[],
+  packageName?: string
 ): void {
   const scope = new Scope(ScopeKind.Constructor, classScope)
   const ctorName = ctor.name ?? className
   const ctorNode: Node = {
     kind: NodeKind.Constructor,
+    modifiers: ctor.factory ? ['factory'] : [],
     name: ctorName,
     start: -1,
     end: -1,
@@ -86,14 +107,17 @@ function registerCustomConstructor(
     documentation: ctor.description,
     typeParameters: ctor.typeParameters ?? [],
     typeArguments: ctor.typeArguments ?? [],
+    package: packageName,
+    columns: [-1, -1], 
   }
 
   nodes.push(ctorNode)
   classScope.define({ name: ctorName, kind: SymbolKind.Constructor, node: ctorNode })
 
   for (const param of ctor.parameters ?? []) {
-    createCustomParameter(param, scope, nodes, className)
+    createCustomParameter(param, scope, nodes, className, packageName)
   }
+  
 }
 
 function registerCustomMember(
@@ -102,7 +126,8 @@ function registerCustomMember(
   classScope: Scope,
   nodes: Node[],
   className: string,
-  isStatic: boolean
+  isStatic: boolean,
+  packageName?: string
 ): void {
   // Simple field
   if (typeof member === 'string' || !(member as any).parameters) {
@@ -117,6 +142,8 @@ function registerCustomMember(
       parentClass: className,
       documentation: (member as any)?.description,
       modifiers: isStatic ? ['static'] : [],
+      package: packageName,
+      columns: [-1, -1],
     }
     nodes.push(node)
     classScope.define({ name, kind: SymbolKind.Field, node })
@@ -138,12 +165,13 @@ function registerCustomMember(
     parentClass: className,
     documentation: method.description,
     modifiers: isStatic ? ['static'] : [],
+    package: packageName,
+    columns: [-1, -1],
   }
   nodes.push(node)
   classScope.define({ name, kind: SymbolKind.Method, node })
-
   for (const param of method.parameters ?? []) {
-    createCustomParameter(param, methodScope, nodes, className)
+    createCustomParameter(param, methodScope, nodes, className, packageName)
   }
 }
 
@@ -158,16 +186,18 @@ function registerCustomFunction(func: CustomFunction, fileScope: Scope, nodes: N
     type: func.returnType,
     typeParameters: func.typeParameters ?? [],
     documentation: func.description,
+    package: func.package,
+    columns: [-1, -1],
   }
   nodes.push(node)
   fileScope.define({ name: func.name, kind: SymbolKind.Function, node })
 
   for (const param of func.parameters ?? []) {
-    createCustomParameter(param, funcScope, nodes, null)
+    createCustomParameter(param, funcScope, nodes, null, func.package)
   }
 }
 
-function createCustomParameter(param: CustomParameter, scope: Scope, nodes: Node[], currentClass: string | null): void {
+function createCustomParameter(param: CustomParameter, scope: Scope, nodes: Node[], currentClass: string | null, packageName?: string): void {
   const paramKind = mapCustomParameterKind(param.kind)
   const node: Node = {
     kind: NodeKind.Parameter,
@@ -180,6 +210,8 @@ function createCustomParameter(param: CustomParameter, scope: Scope, nodes: Node
     defaultValue: param.defaultValue,
     parentClass: currentClass ?? undefined,
     modifiers: param.required ? ['required'] : [],
+    package: packageName,
+    columns: [-1, -1],
   }
   nodes.push(node)
   scope.define({ name: param.name, kind: SymbolKind.Parameter, node })
@@ -208,7 +240,7 @@ export interface CollectResult {
 
 export function collectFromCST(
   cst: CST.CompilationUnit,
-  customTypes?: Array<CustomType | CustomFunction>
+  customTypes?: Array<CustomType | CustomFunction | CustomVariable>
 ): CollectResult {
   const fileScope = new Scope(ScopeKind.File)
   const nodes: Node[] = []
@@ -243,7 +275,6 @@ function collectDeclaration(
   nodes: Node[],
   currentClass: string | null
 ): void {
-  console.log('Collecting declaration of kind:', decl.kind, 'currentClass:', currentClass, decl.name?.lexeme)
   switch (decl.kind) {
     case 'ClassDeclaration':
       collectClass(decl, scope, nodes)
@@ -278,10 +309,41 @@ function collectDeclaration(
   }
 }
 
-function collectConstructor(decl: any, parentScope: Scope, nodes: Node[], currentClass: string | null): void {
+function collectConstructorInitializer(
+  init: CST.ConstructorInitializer,
+  scope: Scope,
+  nodes: Node[],
+  currentClass: string | null
+) : void {
+  if (init.kind === 'FieldInitializer') {
+    // Could analyze field initializers
+    const field = init.fieldName.lexeme
+    const type = inferTypeFromExpression(init.value, scope)
+    const node: Node = {
+      kind: NodeKind.ConstructorInitializer,
+      name: field,
+      start: init.fieldName.start,
+      end: init.fieldName.end,
+      scope,
+      type,
+      parentClass: currentClass ?? undefined,
+      columns: [init.fieldName.column, init.fieldName.column + init.fieldName.lexeme.length],
+    }
+    nodes.push(node)
+    scope.define({ name: field, kind: SymbolKind.ConstructorInitializer, node })
+    return
+  }
+  if (init.kind === 'SuperInitializer') {
+    // Could analyze super initializers
+  }
+  if (init.kind === 'RedirectingInitializer') {
+    // Could analyze redirecting initializers
+  }
+}
+
+function collectConstructor(decl: CST.ConstructorDeclaration, parentScope: Scope, nodes: Node[], currentClass: string | null): void {
   const constructorName = decl.name ? decl.name.lexeme : null; // unnamed constructor uses class name
   const constructorScope = new Scope(ScopeKind.Constructor, parentScope)
-  console.log('Collecting constructor:', constructorName, 'for class:', currentClass, decl)
   const symName = `${currentClass}${constructorName ? `.${constructorName}` : ''}`
   const node: Node = {
     kind: NodeKind.Constructor,
@@ -292,6 +354,7 @@ function collectConstructor(decl: any, parentScope: Scope, nodes: Node[], curren
     type: currentClass || undefined,
     parentClass: currentClass ?? undefined,
     modifiers: getModifiers(decl.modifiers),
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
   nodes.push(node)
   parentScope.define({
@@ -303,6 +366,11 @@ function collectConstructor(decl: any, parentScope: Scope, nodes: Node[], curren
   if (decl.parameters?.parameters) {
     for (const param of decl.parameters.parameters) {
       collectParameter(param, constructorScope, nodes, currentClass)
+    }
+  }
+  if (decl.initializers) {
+    for (const init of decl.initializers) {
+      collectConstructorInitializer(init, constructorScope, nodes, currentClass)
     }
   }
 }
@@ -331,6 +399,7 @@ function collectClass(decl: any, parentScope: Scope, nodes: Node[]): void {
     mixins,
     typeParameters,
     modifiers: getModifiers(decl.modifiers),
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -353,7 +422,6 @@ function collectFunction(
   currentClass: string | null
 ): void {
   const funcName = decl.name.lexeme
-  console.log('Collecting function:', decl.returnType)
   const returnType = CST.typeAnnotationToString(decl.returnType)
   
   // Check if this is a constructor (name matches class name)
@@ -382,6 +450,7 @@ function collectFunction(
     typeParameters,
     parentClass: currentClass ?? undefined,
     modifiers: getModifiers(decl.modifiers),
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -397,7 +466,6 @@ function collectFunction(
       collectParameter(param, funcScope, nodes, currentClass)
     }
   }
-  console.log('Function parameters collected for:', funcName, decl.body)
   // Collect body statements
   if (decl.body?.kind === 'BlockFunctionBody' && decl.body.statements) {
     for (const stmt of decl.body.statements) {
@@ -477,6 +545,7 @@ function collectParameter(
     reference: param.isThis ? 'this' : (param.isSuper ? 'super' : undefined),
     modifiers: param.isRequired ? ['required'] : [],
     nullable: param.type?.isNullable ?? false,
+    columns: [param.name ? param.name.column : -1, param.name ? param.name.column + param.name.lexeme.length : -1],
   }
 
   // Extract default value if present
@@ -521,6 +590,7 @@ function collectVariable(
     parentClass: currentClass ?? undefined,
     modifiers: getModifiers(decl.modifiers),
     nullable: decl.type?.isNullable ?? false,
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   // Extract initializer info
@@ -528,7 +598,6 @@ function collectVariable(
     node.initializerStart = decl.initializer.range[0]
     node.initializerEnd = decl.initializer.range[1]
   }
-  console.log('Variable node:', node)
 
   nodes.push(node)
   parentScope.define({
@@ -556,6 +625,7 @@ function collectGetter(
     type: returnType || undefined,
     parentClass: currentClass ?? undefined,
     modifiers: [...getModifiers(decl.modifiers), 'get'],
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -583,6 +653,7 @@ function collectSetter(
     scope: setterScope,
     parentClass: currentClass ?? undefined,
     modifiers: [...getModifiers(decl.modifiers), 'set'],
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -640,6 +711,7 @@ function collectTypedef(decl: any, parentScope: Scope, nodes: Node[]): void {
     scope: parentScope,
     type: aliasedType,
     typeParameters,
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
   
   nodes.push(node)
@@ -662,6 +734,7 @@ function collectEnum(decl: any, parentScope: Scope, nodes: Node[]): void {
     scope: enumScope,
     type: enumName,
     modifiers: ['enum'],
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -681,6 +754,7 @@ function collectEnum(decl: any, parentScope: Scope, nodes: Node[]): void {
       scope: enumScope,
       type: enumName,
       modifiers: ['static', 'const'],
+      columns: [value.name ? value.name.column : -1, value.name ? value.name.column + value.name.lexeme.length : -1],
     }
     nodes.push(valueNode)
     enumScope.define({
@@ -710,6 +784,7 @@ function collectMixin(decl: any, parentScope: Scope, nodes: Node[]): void {
     implementsTypes,
     typeParameters,
     modifiers: ['mixin'],
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
@@ -726,25 +801,26 @@ function collectMixin(decl: any, parentScope: Scope, nodes: Node[]): void {
 }
 
 function collectExtension(decl: any, parentScope: Scope, nodes: Node[]): void {
-  const extScope = new Scope(ScopeKind.Class, parentScope)
+  const extScope = new Scope(ScopeKind.Extension, parentScope)
   const extName = decl.name?.lexeme ?? ''
   const extendedType = CST.typeAnnotationToString(decl.extendedType)
 
   const node: Node = {
-    kind: NodeKind.Class,
+    kind: NodeKind.Extension,
     name: extName,
     start: decl.range[0],
     end: decl.range[1],
     scope: extScope,
     type: extendedType,
-    modifiers: ['extension'],
+    modifiers: [],
+    columns: [decl.name ? decl.name.column : -1, decl.name ? decl.name.column + decl.name.lexeme.length : -1],
   }
 
   nodes.push(node)
   if (extName) {
     parentScope.define({
       name: extName,
-      kind: SymbolKind.Class,
+      kind: SymbolKind.Extension,
       node,
     })
   }
@@ -778,14 +854,15 @@ function collectStatement(
     case 'DoWhileStatement':
       if (stmt.body) collectStatement(stmt.body, scope, nodes, currentClass)
       break
+    case 'ConstructorInitializer':
+      // Could analyze initializer expressions
+      break
     case 'TryStatement':
       // Could handle catch variables
       break
     // Block-like statements that contain more statements
     default:
-      console.log('Collecting statements of kind:', stmt.kind)
       if (stmt.statements) {
-        console.log('Collecting block statements:', stmt.statements.length)
         for (const s of stmt.statements) {
           collectStatement(s, scope, nodes, currentClass)
         }
@@ -816,6 +893,7 @@ function collectVariableStatement(
     parentClass: currentClass ?? undefined,
     modifiers: getModifiers(stmt.modifiers),
     nullable: stmt.type?.isNullable ?? false,
+    columns: [stmt.name ? stmt.name.column : -1, stmt.name ? stmt.name.column + stmt.name.lexeme.length : -1],
   }
 
   if (stmt.initializer) {
@@ -852,7 +930,6 @@ function extractExpressionText(expr: any): string | undefined {
  */
 function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
   if (!expr) return undefined
-  console.log('Inferring type from expression kind:', expr.kind)
   switch (expr.kind) {
     case 'FunctionCall': {
       // FunctionCall with Identifier target could be a constructor call or function call
@@ -898,7 +975,6 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
       return inferRecordTypeFromLiteral(expr, scope)
     }
     case 'RecordTypeLiteral': {
-      console.log('RecordTypeLiteral inference not implemented yet')
       return inferRecordTypeFromLiteral(expr, scope)
     }
     case 'Identifier': {
@@ -920,7 +996,6 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
     }
     case 'MethodInvocation': {
       // Infer return type from method invocation
-      console.log('Inferring type from MethodInvocation:', expr)
       const targetType = inferTypeFromExpression(expr.target, scope)
       if (targetType) {
         const methodSym = resolveClassMemberInScope(targetType, expr.methodName?.lexeme, scope)
@@ -973,6 +1048,7 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
                 end: param.name.end,
                 type: paramType,
                 scope: funcScope,
+                columns: [param.name ? param.name.column : -1, param.name ? param.name.column + param.name.lexeme.length : -1],
               },
             })
           }
@@ -1005,6 +1081,34 @@ function inferTypeFromExpression(expr: any, scope: Scope): string | undefined {
       return 'bool'
     case 'NullLiteral':
       return 'Null'
+    case 'UnaryExpression': {
+      const operandType = inferTypeFromExpression(expr.operand, scope)
+      const operator = expr.operator?.lexeme
+      if (operator === 'await' && operandType) {
+        // Extract T from Future<T> or FutureOr<T>
+        const futureMatch = operandType.match(/^(?:Future|FutureOr)<(.+)>$/)
+        if (futureMatch) {
+          return futureMatch[1]
+        }
+        // If it's just Future without type args, return dynamic
+        if (operandType === 'Future' || operandType === 'FutureOr') {
+          return 'dynamic'
+        }
+        // If it's not a Future type, return as-is (await on non-Future is valid in Dart)
+        return operandType
+      }
+      if (operator === '!') {
+        return 'bool'
+      }
+      if (operator === '-' || operator === '~') {
+        return operandType
+      }
+      return operandType
+    }
+    case 'PostfixExpression': {
+      // For ++ and --, return the operand type
+      return inferTypeFromExpression(expr.operand, scope)
+    }
     default:
       return undefined
   }
@@ -1026,6 +1130,7 @@ function inferRecordTypeFromLiteral(expr: any, scope: Scope): string | undefined
         end: -1,
         scope: recordScope,
         type: valueType,
+        columns: [-1, -1],
       },
     })
     positionalTypes.push(valueType)
@@ -1044,6 +1149,7 @@ function inferRecordTypeFromLiteral(expr: any, scope: Scope): string | undefined
         end: field.name.end,
         scope: recordScope,
         type: valueType,
+        columns: [field.name ? field.name.column : -1, field.name ? field.name.column + field.name.lexeme.length : -1],
       },
     })
     namedTypes.push(`${valueType} ${field.name.lexeme}`)
@@ -1063,6 +1169,7 @@ function inferRecordTypeFromLiteral(expr: any, scope: Scope): string | undefined
     end: -1,
     scope: recordScope,
     type: `(${parts.join(', ')})`,
+    columns: [-1, -1] as [number, number],
   }
   scope.define({
     name: node.name,

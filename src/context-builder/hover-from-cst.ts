@@ -6,7 +6,7 @@
  * caused many edge cases and headaches.
  */
 
-import { Token } from './lexer'
+import { Token, TokenType } from './lexer'
 import { Scope, ScopeKind } from './scope'
 import { SymbolEntry, SymbolKind } from './symbol-entry'
 import { Node, NodeKind, ParameterKind } from './node'
@@ -21,6 +21,7 @@ class HoversGenerator {
 export interface Hover {
   range: { start: number; end: number }
   markdown: string
+  columns: [number, number]
   expectedValue?: string
   documentation?: string
 }
@@ -30,6 +31,7 @@ export interface HoverContext {
   currentClass?: string
   /** Expected type for contextual type inference (e.g., callback parameter types) */
   expectedType?: string
+  staticMember?: boolean
 }
 
 /**
@@ -153,6 +155,7 @@ export function generateHoversFromCST(cst: any, fileScope: Scope): Hover[] {
         markdown: formatSymbol(sym, fileScope),
         expectedValue: sym.name,
         documentation: buildDocumentation(sym),
+        columns: sym.node.columns,
       })
     }
   }
@@ -199,7 +202,7 @@ function collectHoversFromDeclaration(
 }
 
 function collectHoversFromConstructor(
-  decl: any,
+  decl: CST.ConstructorDeclaration,
   parentScope: Scope,
   hovers: Hover[],
   ctx: HoverContext
@@ -215,7 +218,60 @@ function collectHoversFromConstructor(
       markdown: formatSymbol(sym),
       expectedValue: constructorName ? `${className}.${constructorName}` : className,
       documentation: buildDocumentation(sym),
+      columns: [decl.className.column, constructorName ? decl.name.column + constructorName.length : decl.className.column + className.length],
     })
+  }
+  for (const param of decl.parameters.parameters) {
+    collectHoversFromParameter(param, sym?.node.scope || parentScope, hovers, ctx)
+  }
+  for (const init of decl.initializers || []) {
+    collectHoversFromConstructorInitializer(init, sym?.node.scope || parentScope, hovers, ctx)
+  }
+  if (decl.body) {
+    collectHoversFromFunctionBody(decl.body, sym?.node.scope || parentScope, hovers, ctx)
+  }
+}
+
+function collectHoversFromConstructorInitializer(init: CST.ConstructorInitializer, scope: Scope, hovers: Hover[], ctx: HoverContext): void {
+  if (init.kind === 'SuperInitializer') {
+    // Hover for super constructor call
+    const superConstructorName = init.constructorName?.lexeme
+    if (!superConstructorName) {
+      // Default super constructor
+      const currentClassSym = ctx.currentClass ? ctx.fileScope.resolve(ctx.currentClass) : null
+      const superClassName = currentClassSym && currentClassSym.node.extendsTypes && currentClassSym.node.extendsTypes.length > 0 ?
+        currentClassSym.node.extendsTypes[0] : null;
+      if (superClassName) {
+        const superClassSym = ctx.fileScope.resolve(superClassName)
+        const superConstructor = superClassSym.node.scope?.resolve(superClassName)
+        if (superConstructor) {
+          hovers.push({
+            range: { start: init.range[0], end: init.range[1] },
+            markdown: formatSymbol(superConstructor),
+            expectedValue: 'super',
+            documentation: buildDocumentation(superConstructor),
+            columns: [init.columns[0], init.columns[1]],
+          })
+        }
+      }
+    }
+  } else if (init.kind === 'RedirectingInitializer') {
+    // Hover for this constructor call
+    const thisType = init.constructorName.lexeme
+    const constructor = scope.resolve(thisType)
+  } else if (init.kind === 'FieldInitializer') {
+    // Hover for field being initialized
+    const fieldName = init.fieldName.lexeme
+    const fieldSym = scope.resolve(fieldName)
+    if (fieldSym) {
+      hovers.push({
+        range: { start: init.fieldName.start, end: init.fieldName.end },
+        markdown: formatSymbol(fieldSym),
+        expectedValue: fieldName,
+        documentation: buildDocumentation(fieldSym),
+        columns: [init.fieldName.column, init.fieldName.column + fieldName.length],
+      })
+    }
   }
 }
 
@@ -234,6 +290,7 @@ function collectHoversFromClass(
       markdown: formatSymbol(sym),
       expectedValue: className,
       documentation: sym.node.documentation,
+      columns: sym.node.columns,
     })
   }
 
@@ -285,6 +342,7 @@ function collectHoversFromMixin(
       markdown: formatSymbol(sym),
       expectedValue: mixinName,
       documentation: sym.node.documentation,
+      columns: sym.node.columns,
     })
   }
 
@@ -324,6 +382,7 @@ function collectHoversFromEnum(
       markdown: formatSymbol(sym),
       expectedValue: enumName,
       documentation: sym.node.documentation,
+      columns: sym.node.columns,
     })
   }
 
@@ -337,6 +396,8 @@ function collectHoversFromEnum(
           range: { start: value.name.start, end: value.name.end },
           markdown: formatSymbol(valueSym),
           expectedValue: value.name.lexeme,
+          documentation: buildDocumentation(valueSym),
+          columns: valueSym.node.columns,
         })
       }
     }
@@ -358,7 +419,8 @@ function collectHoversFromExtension(
         range: { start: decl.name.start, end: decl.name.end },
         markdown: formatSymbol(sym),
         expectedValue: extName,
-        documentation: sym.node.documentation,
+        documentation: buildDocumentation(sym),
+        columns: sym.node.columns,
       })
     }
   }
@@ -399,7 +461,8 @@ function collectHoversFromTypedef(
       range: { start: decl.name.start, end: decl.name.end },
       markdown: formatSymbol(sym),
       expectedValue: typedefName,
-      documentation: sym.node.documentation,
+      documentation: buildDocumentation(sym),
+      columns: sym.node.columns,
     })
   }
 
@@ -436,15 +499,16 @@ function collectHoversFromFunction(
 ): void {
   const funcName = decl.name.lexeme
   const sym = parentScope.resolve(funcName)
-  
   if (sym) {
     hovers.push({
       range: { start: decl.name.start, end: decl.name.end },
       markdown: formatSymbol(sym),
       expectedValue: funcName,
       documentation: buildDocumentation(sym),
+      columns: sym.node.columns,
     })
   }
+  ctx.staticMember = decl.modifiers?.some((m: any) => m.type === TokenType.STATIC) || false
 
   // Collect hovers from return type
   if (decl.returnType) {
@@ -459,7 +523,7 @@ function collectHoversFromFunction(
   }
 
   // Collect hovers from parameters
-  const funcScope = sym?.node.scope || parentScope
+  let funcScope = sym?.node.scope || parentScope
   if (decl.parameters?.parameters) {
     for (const param of decl.parameters.parameters) {
       collectHoversFromParameter(param, funcScope, hovers, ctx)
@@ -470,10 +534,11 @@ function collectHoversFromFunction(
   if (decl.body) {
     collectHoversFromFunctionBody(decl.body, funcScope, hovers, ctx)
   }
+  ctx.staticMember = false
 }
 
 function collectHoversFromVariable(
-  decl: any,
+  decl: CST.VariableDeclaration,
   scope: Scope,
   hovers: Hover[],
   ctx: HoverContext
@@ -487,6 +552,7 @@ function collectHoversFromVariable(
       markdown: formatSymbol(sym, scope),
       expectedValue: varName,
       documentation: buildDocumentation(sym),
+      columns: sym.node.columns,
     })
   } else {
     // Fallback: still surface a hover with best-effort type text
@@ -495,6 +561,7 @@ function collectHoversFromVariable(
       range: { start: decl.name.start, end: decl.name.end },
       markdown: typeText ? `${typeText} ${varName}` : varName,
       expectedValue: varName,
+      columns: [decl.name.column, decl.name.column + varName.length],
     })
   }
 
@@ -505,7 +572,6 @@ function collectHoversFromVariable(
 
   // Collect hovers from initializer expression
   if (decl.initializer) {
-    console.log('Collecting hovers from variable initializer:', decl)
     collectHoversFromExpression(decl.initializer, scope, hovers, ctx)
   }
 }
@@ -525,6 +591,7 @@ function collectHoversFromAccessor(
       markdown: formatSymbol(sym),
       expectedValue: name,
       documentation: buildDocumentation(sym),
+      columns: sym.node.columns,
     })
   }
 
@@ -547,29 +614,63 @@ function collectHoversFromParameter(
   param: any,
   scope: Scope,
   hovers: Hover[],
-  ctx: HoverContext
+  ctx: HoverContext,
 ): void {
+  let savedParam = false;
   const paramName = param.name.lexeme
-  const sym = scope.resolve(paramName)
-  
-  if (sym) {
-    hovers.push({
-      range: { start: param.name.start, end: param.name.end },
-      markdown: formatSymbol(sym),
-      expectedValue: paramName,
-      documentation: buildDocumentation(sym),
-    })
+  if (param.isThis || param.isSuper) {
+    const sym = scope.resolve(paramName)
+    if (sym) {
+      hovers.push({
+        range: { start: param.name.start, end: param.name.end },
+        markdown: formatSymbol(sym),
+        expectedValue: paramName,
+        documentation: buildDocumentation(sym),
+        columns: sym.node.columns,
+      })
+      savedParam = true;
+    }
   }
 
   // Collect hovers from parameter type
   if (param.type) {
-    collectHoversFromType(param.type, scope, hovers, ctx)
+    let typeScope = scope
+    if (ctx.staticMember && ctx.currentClass) {
+      while(typeScope.kind !== ScopeKind.File && typeScope.parent) {
+        typeScope = typeScope.parent
+      }
+    }
+    collectHoversFromType(param.type, typeScope, hovers, ctx)
   }
 
   // Collect hovers from default value
   if (param.defaultValue) {
     collectHoversFromExpression(param.defaultValue, scope, hovers, ctx)
   }
+  if (!savedParam) {
+    hovers.push({
+      range: { start: param.name.start, end: param.name.end },
+      markdown: formatSymbol({
+        kind: SymbolKind.Parameter,
+        name: paramName,
+        node: {
+          name: paramName,
+          kind: NodeKind.Parameter,
+          parameterKind: param.isNamed ? ParameterKind.Named : param.isOptional ? ParameterKind.OptionalPositional : ParameterKind.Positional,
+          defaultValue: param.defaultValue,
+          type: param.type?.typeName.parts?.map((p: any) => p.lexeme).join('.') || 'dynamic',
+          scope: scope,
+          start: param.name.start,
+          end: param.name.end,
+          columns: [param.name.column, param.name.column + paramName.length],
+        }
+      }),
+      expectedValue: paramName,
+      documentation: buildDocumentation(param.documentation),
+      columns: [param.name.column, param.name.column + paramName.length],
+    })
+  }
+
 }
 
 function collectHoversFromTypeParameter(
@@ -582,6 +683,7 @@ function collectHoversFromTypeParameter(
     range: { start: tp.name.start, end: tp.name.end },
     markdown: `\`${tp.name.lexeme}\``,
     expectedValue: tp.name.lexeme,
+    columns: [tp.name.column, tp.name.column + tp.name.lexeme.length],
   })
 
   // If there's a bound, we could show it too
@@ -640,6 +742,7 @@ function collectHoversFromTypeName(
       range: { start: typeName.range[0], end: typeName.range[1] },
       markdown: display,
       expectedValue: display,
+      columns: [typeName.start.column, typeName.start.column + display.length],
     })
 
     // Named fields get their own hover entries with their types
@@ -650,6 +753,7 @@ function collectHoversFromTypeName(
         range: { start: field.name.start, end: field.name.end },
         markdown: fieldDisplay,
         expectedValue: field.name.lexeme,
+        columns: [field.name.column, field.name.column + field.name.lexeme.length],
       })
       collectHoversFromType(field.type, scope, hovers, ctx)
     }
@@ -683,7 +787,8 @@ function collectHoversFromTypeName(
         range: { start: firstPart.start, end: firstPart.end },
         markdown,
         expectedValue: typeLexeme,
-        documentation: sym.node.documentation,
+        documentation: buildDocumentation(sym),
+        columns: sym.node.columns,
       })
     }
 
@@ -856,6 +961,7 @@ function collectHoversFromExpression(
       hovers.push({
         range: { start: expr.range[0], end: expr.range[1] },
         markdown: 'record literal',
+        columns: expr.start.columns,
       })
       for (const field of expr.namedFields || []) {
         collectHoversFromExpression(field.value, scope, hovers, ctx)
@@ -896,6 +1002,7 @@ function collectHoversFromInterpolations(interpolations: any[], scope: Scope, ho
         markdown: formatSymbol(sym),
         expectedValue: interp.lexeme,
         documentation: buildDocumentation(sym),
+        columns: interp.columns,
       })
     }
   }
@@ -916,12 +1023,13 @@ function collectHoversFromIdentifier(
       markdown: formatSymbol(sym),
       expectedValue: name,
       documentation: buildDocumentation(sym),
+      columns: sym.node.columns,
     })
   }
 }
 
 function collectHoversFromPropertyAccess(
-  expr: any,
+  expr: CST.PropertyAccess,
   scope: Scope,
   hovers: Hover[],
   ctx: HoverContext
@@ -944,13 +1052,14 @@ function collectHoversFromPropertyAccess(
         markdown: substitutedSym,
         expectedValue: propertyName,
         documentation: buildDocumentation(propertySym),
+        columns: [expr.propertyName.column, expr.propertyName.column + propertyName.length],
       })
     }
   }
 }
 
 function collectHoversFromMethodCall(
-  expr: any,
+  expr: CST.MethodInvocation,
   scope: Scope,
   hovers: Hover[],
   ctx: HoverContext
@@ -963,18 +1072,14 @@ function collectHoversFromMethodCall(
   if (!methodName) return
   
   const targetType = inferExpressionType(expr.target, scope, ctx)
-  
   let methodSym: SymbolEntry | undefined
   let typeArgMap = new Map<string, string>()
-  console.log('Method call target type inferred as:', targetType)
   if (targetType) {
     methodSym = resolveTypeMember(targetType, methodName, ctx)
-    console.log('Resolved method symbol for', methodName, ':', methodSym)
     if (methodSym === undefined) {
       // Maybe it is a constructor call
       methodSym = resolveTypeMember(targetType, `${targetType}.${methodName}`, ctx)
     }
-    console.log('After checking constructor, method symbol is:', methodSym)
     const typeParams = methodSym?.node.typeParameters || []
     if (methodSym) {
       // Build type argument map from the target type (e.g., List<RecordType> -> E=RecordType)
@@ -990,6 +1095,7 @@ function collectHoversFromMethodCall(
         markdown: substitutedSym,
         expectedValue: methodName,
         documentation: buildDocumentation(methodSym),
+        columns: [expr.methodName.column, expr.methodName.column + methodName.length],
       })
     }
   }
@@ -1034,7 +1140,7 @@ function collectHoversFromMethodCall(
 }
 
 function collectHoversFromFunctionCall(
-  expr: any,
+  expr: CST.FunctionCall,
   scope: Scope,
   hovers: Hover[],
   ctx: HoverContext
@@ -1055,6 +1161,7 @@ function collectHoversFromFunctionCall(
           markdown: formattedSig,
           expectedValue: name,
           documentation: buildDocumentation(constructorSym),
+          columns: constructorSym.node.columns,
         })
       } else {
         // Fallback to just showing class
@@ -1063,6 +1170,7 @@ function collectHoversFromFunctionCall(
           markdown: formatSymbol(sym),
           expectedValue: name,
           documentation: buildDocumentation(sym),
+          columns: [expr.target.name.column, expr.target.name.column + name.length],
         })
       }
     } else if (sym) {
@@ -1072,6 +1180,7 @@ function collectHoversFromFunctionCall(
         markdown: formatSymbol(sym),
         expectedValue: name,
         documentation: buildDocumentation(sym),
+        columns: [expr.target.name.column, expr.target.name.column + name.length],
       })
     }
   } else {
@@ -1136,6 +1245,7 @@ function collectHoversFromFunctionExpression(
         end: param.name.end,
         type: paramType,
         scope: funcScope,
+        columns: [param.name.column, param.name.column + paramName.length],
       }
       
       // Add parameter to the function scope so we can resolve it in return statements
@@ -1152,6 +1262,7 @@ function collectHoversFromFunctionExpression(
         markdown: formatSymbol(paramSymbol, funcScope),
         expectedValue: paramName,
         documentation: 'Parameter',
+        columns: [param.name.column, param.name.column + paramName.length],
       })
       
       // Also collect hovers from parameter types
@@ -1182,6 +1293,7 @@ function collectHoversFromFunctionExpression(
       markdown: signature,
       expectedValue: '(',
       documentation: 'Anonymous function expression',
+      columns: [expr.start.column, expr.start.column + 1],
     })
   }
 
@@ -1375,6 +1487,34 @@ function inferExpressionType(expr: any, scope: Scope, ctx: HoverContext): string
         return `Set<${elemType}>`
       }
       return 'Set<dynamic>'
+    case 'UnaryExpression': {
+      const operandType = inferExpressionType(expr.operand, scope, ctx)
+      const operator = expr.operator?.lexeme
+      if (operator === 'await' && operandType) {
+        // Extract T from Future<T> or FutureOr<T>
+        const futureMatch = operandType.match(/^(?:Future|FutureOr)<(.+)>$/)
+        if (futureMatch) {
+          return futureMatch[1]
+        }
+        // If it's just Future without type args, return dynamic
+        if (operandType === 'Future' || operandType === 'FutureOr') {
+          return 'dynamic'
+        }
+        // If it's not a Future type, return as-is (await on non-Future is valid in Dart)
+        return operandType
+      }
+      if (operator === '!') {
+        return 'bool'
+      }
+      if (operator === '-' || operator === '~') {
+        return operandType
+      }
+      return operandType
+    }
+    case 'PostfixExpression': {
+      // For ++ and --, return the operand type
+      return inferExpressionType(expr.operand, scope, ctx)
+    }
     default:
       return undefined
   }
@@ -1845,11 +1985,12 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
       }
       const modifiers = (sym.node.modifiers?.length ?? 0) > 0 ? sym.node.modifiers?.join(' ') + ' ' : ''
       return `\`${modifiers}class ${sym.name}${generics}${additionalParts.length > 0 ? ' ' + additionalParts.join(' ') : ''}\``
-    
+    case SymbolKind.Extension:
+      return `extension ${sym.name}${renderTypeParams(sym.node.typeParameters)} on ${type}`
     case SymbolKind.Variable:
     case SymbolKind.Field:
+    case SymbolKind.ConstructorInitializer:
       return `${type}${sym.node.nullable ? '?' : ''} ${sym.name}`
-    
     case SymbolKind.Parameter:
       if (sym.node.parameterKind === ParameterKind.OptionalPositional) {
         return `[${type}${sym.node.nullable ? '?' : ''} ${sym.name}${sym.node.defaultValue ? ` = ${sym.node.defaultValue}` : ''}]`
@@ -1861,12 +2002,27 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
     
     case SymbolKind.Function:
     case SymbolKind.Method:
-      const modifierStr = (sym.node.modifiers?.length ?? 0) > 0 ? sym.node.modifiers?.join(' ') + ' ' : ''
+      let modifierStr = ''
+      let currentModifiers = [
+        ...(sym.node.modifiers ?? []),
+      ]
+      if (currentModifiers.length > 0) {
+        if (currentModifiers.includes('async')) { 
+          currentModifiers = currentModifiers.filter(m => m !== 'async')
+        }
+        if (currentModifiers.includes('sync')) {
+          currentModifiers = currentModifiers.filter(m => m !== 'sync')
+        }
+        if (currentModifiers.length > 0) {
+          modifierStr = currentModifiers.join(' ') + ' '
+        }
+      }
       return `${modifierStr}${type}${sym.node.nullable ? '?' : ''} ${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
 
     case SymbolKind.Constructor:
       const modifier = sym.node.modifiers?.[0] === undefined ? '' : `${sym.node.modifiers?.join(' ')} `
-      return `${modifier}${sym.name}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
+      const constructorName = sym.name === sym.node.parentClass ? '' : `.${sym.name}`
+      return `${modifier}${sym.node.parentClass}${constructorName}${renderTypeParams(sym.node.typeParameters)}(${parameterBlock})`
     
     case SymbolKind.Accessor:
       const accessorMod = sym.node.modifiers?.includes('get') ? 'get ' : 
@@ -1876,7 +2032,6 @@ function formatSymbol(sym: SymbolEntry, scope?: Scope): string {
     case SymbolKind.Typedef:
       // Show alias name and resolved target signature
       return `typedef ${sym.name}${renderTypeParams(sym.node.typeParameters)} = ${type}`
-    
     default:
       return `**${sym.name}**`
   }
@@ -1903,17 +2058,17 @@ function substituteTypeParameters(typeStr: string, typeParams: string[], typeArg
 function buildDocumentation(sym: SymbolEntry): string | undefined {
   const parts: string[] = []
   
-  if (sym.node.parentClass) {
-    let declared = `Declared in \`${sym.node.parentClass}\``
-    if (sym.node.package) declared += ` in \`${sym.node.package}\``
+  if (sym?.node?.parentClass) {
+    let declared = `Declared in \`${sym.node?.parentClass}\``
+    if (sym?.node?.package) declared += ` in \`${sym.node?.package}\``
     parts.push(declared)
   }
-  if (sym.node.package && !sym.node.parentClass) {
-    parts.push(`Declared in \`${sym.node.package}\``)
+  if (sym?.node?.package && !sym?.node?.parentClass) {
+    parts.push(`Declared in \`${sym.node?.package}\``)
   }
   
-  if (sym.node.documentation) {
-    parts.push(sym.node.documentation)
+  if (sym?.node?.documentation) {
+    parts.push(sym.node?.documentation)
   }
   
   return parts.length > 0 ? parts.join('\n\n') : undefined

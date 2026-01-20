@@ -37,9 +37,11 @@ export enum NodeKind {
   Field,
   Method,
   Constructor,
+  ConstructorInitializer,
   Parameter,
   Variable,
   Accessor,
+  Extension,
   TemplateString,
   Typedef,
   RecordTypeLiteral,
@@ -73,6 +75,7 @@ export interface Node {
   documentation?: string
   nullable?: boolean
   package?: string
+  columns: [ number, number ]
 }
 
 export interface ExtendableNode extends Node {

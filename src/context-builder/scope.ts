@@ -8,6 +8,7 @@ export enum ScopeKind {
   Function,
   Block,
   RecordTypeLiteral,
+  Extension
 }
 
 export class Scope {

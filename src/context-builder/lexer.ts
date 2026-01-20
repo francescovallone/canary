@@ -119,6 +119,7 @@ export class DartLexer {
   private current: number = 0;  // Current position
   private line: number = 1;
   private column: number = 1;
+  private tokens: Token[] = [];
 
   constructor() {
     this.source = '';
@@ -130,17 +131,16 @@ export class DartLexer {
     this.current = 0;
     this.line = 1;
     this.column = 1;
-    
-    const tokens: Token[] = [];
-    
+    this.tokens = [];
+
     while (!this.isAtEnd()) {
       this.start = this.current;
       const token = this.scanToken();
-      if (token) tokens.push(token);
+      if (token) this.tokens.push(token);
     }
     
-    tokens.push(this.makeToken(TokenType.EOF, ''));
-    return tokens;
+    this.tokens.push(this.makeToken(TokenType.EOF, ''));
+    return this.tokens;
   }
   
   private scanToken(interpolationStart?: number): Token | null {
@@ -558,8 +558,7 @@ export class DartLexer {
       ['abstract', TokenType.ABSTRACT],
       ['as', TokenType.AS],
       ['assert', TokenType.ASSERT],
-      ['async', TokenType.ASYNC],
-      ['await', TokenType.AWAIT],
+      // contextual keywords (async, await, etc.) are intentionally *not* mapped here so they tokenize as identifiers
       ['break', TokenType.BREAK],
       ['case', TokenType.CASE],
       ['catch', TokenType.CATCH],
@@ -574,38 +573,35 @@ export class DartLexer {
       ['enum', TokenType.ENUM],
       ['export', TokenType.EXPORT],
       ['extends', TokenType.EXTENDS],
-      ['extension', TokenType.EXTENSION],
+      // extension (contextual)
       ['external', TokenType.EXTERNAL],
-      ['factory', TokenType.FACTORY],
+      // factory (contextual)
       ['false', TokenType.FALSE],
       ['final', TokenType.FINAL],
       ['finally', TokenType.FINALLY],
       ['for', TokenType.FOR],
       ['function', TokenType.FUNCTION],
       ['Function', TokenType.FUNCTION],  // Dart uses capital F for function types
-      ['get', TokenType.GET],
-      ['hide', TokenType.HIDE],
+      // get/hide are contextual
       ['if', TokenType.IF],
       ['implements', TokenType.IMPLEMENTS],
       ['import', TokenType.IMPORT],
       ['in', TokenType.IN],
       ['interface', TokenType.INTERFACE],
       ['is', TokenType.IS],
-      ['late', TokenType.LATE],
+      // late (contextual)
       ['library', TokenType.LIBRARY],
-      ['mixin', TokenType.MIXIN],
+      // mixin (contextual)
       ['native', TokenType.NATIVE],
       ['new', TokenType.NEW],
       ['null', TokenType.NULL],
       ['of', TokenType.OF],
-      ['on', TokenType.ON],
-      ['operator', TokenType.OPERATOR],
+      // operator (contextual)
       ['part', TokenType.PART],
-      ['required', TokenType.REQUIRED],
+      // required (contextual)
       ['rethrow', TokenType.RETHROW],
       ['return', TokenType.RETURN],
-      ['set', TokenType.SET],
-      ['show', TokenType.SHOW],
+      // set/show are contextual
       ['static', TokenType.STATIC],
       ['super', TokenType.SUPER],
       ['switch', TokenType.SWITCH],
@@ -614,12 +610,12 @@ export class DartLexer {
       ['throw', TokenType.THROW],
       ['true', TokenType.TRUE],
       ['try', TokenType.TRY],
-      ['typedef', TokenType.TYPEDEF],
+      // typedef (contextual)
       ['var', TokenType.VAR],
       ['void', TokenType.VOID],
       ['while', TokenType.WHILE],
       ['with', TokenType.WITH],
-      ['yield', TokenType.YIELD],
+      // yield (contextual)
     ]);
     
     return keywords.get(text) || TokenType.IDENTIFIER;

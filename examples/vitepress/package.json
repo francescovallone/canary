@@ -5,7 +5,8 @@
     "docs:preview": "vitepress preview"
   },
   "dependencies": {
-    "vitepress": "2.0.0-alpha.15"
+    "vitepress": "2.0.0-alpha.15",
+    "@avesbox/canary": "file:../../"
   },
   "devDependencies": {
     "@shikijs/vitepress-twoslash": "^3.20.0"

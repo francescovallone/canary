@@ -23,36 +23,50 @@ features:
     details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
 ---
 
+::: code-group
 
-```dart canary
-class Person {
-  String name;
-  int age;
+```dart canary [Entrypoint]
+import 'package:serinus/serinus.dart';
+import 'module.dart';
 
-  Person(this.name, this.age);
+extension App on SerinusFactory {}
 
-  Person.namedConstructor(this.name) : age = 0;
+Future<void> main() async {
+  final app = await serinus.createApplication(
+//                          ^?
+    entrypoint: AppModule(),
+  );
+// ---cut-start---
+  await app.serve();
+// ---cut-end---
+}
+```
 
-  factory Person.factoryConstructor(String name, int age) {
-    return Person(name, age);
+```dart canary [Entrypoint]
+class AppModule extends Module {
+  AppModule() : super(
+//                ^?
+    controllers: [AppController()],
+  );
+}
+```
+
+```dart canary [Module]
+import 'package:serinus/serinus.dart';
+
+class AppController extends Controller {
+  AppController() : super('/') {
+    on(Route.get('/'), _handleHelloWorld);
   }
 
-  static staticMethod() {
-    print('This is a static method.');
-  }
-
-  void greet() {
-    print('Hello, my name is $name and I am $age years old.');
+  String _handleHelloWorld(RequestContext context) {
+    return 'Hello, World!';
   }
 }
-
-final jhon = Person('Jhon', 30);
-final jane = Person.namedConstructor('Jane');
-final bob = Person.factoryConstructor('Bob', 25);
-Person.staticMethod();
-jhon.greet();
-
 ```
+
+
+:::
 
 ```ts twoslash
 // @errors: 2554 2339
@@ -60,6 +74,7 @@ class Animal {
   name: string;
   constructor(name: string) {
     this.name = name;
+//       ^?
   }
 
   bark(): void {
